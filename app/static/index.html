@@ -36,7 +36,7 @@
 <header>
   <h1>Maintenance work-order assistant</h1>
   <label class="muted" for="key">API key</label>
-  <input id="key" style="max-width:220px" value="planner-demo-key" aria-label="API key">
+  <input id="key" style="max-width:220px" placeholder="paste your API key" aria-label="API key" autocomplete="off">
 </header>
 <main>
   <section aria-labelledby="assets-h">
@@ -95,7 +95,7 @@ function render(r) {
   $("reason").textContent = r.reason || (r.work_order ? `Created ${r.work_order}` : "");
   const d = r.draft;
   $("draft").innerHTML = !d ? "" : `
-    <p><span class="badge ${d.priority === "P1" ? "alarm" : "warn"}" data-testid="priority">${esc(d.priority)}</span> ${esc(d.problem_summary)}</p>
+    <p><strong data-testid="draft-asset">${esc(d.asset_id)}</strong> <span class="badge ${d.priority === "P1" ? "alarm" : "warn"}" data-testid="priority">${esc(d.priority)}</span> ${esc(d.problem_summary)}</p>
     <table><thead><tr><th>Evidence</th><th>Value</th><th>Time</th></tr></thead><tbody>
       ${d.evidence.map(e => `<tr><td>${esc(e.metric)}</td><td>${esc(e.value)} ${esc(e.unit)}</td><td class="muted">${esc(e.timestamp)}</td></tr>`).join("")}
     </tbody></table>
@@ -115,7 +115,8 @@ async function act(fn) { try { render(await fn()); } catch (e) { $("status").tex
 $("run").onclick = () => act(() => api("/api/runs", {method: "POST", body: JSON.stringify({asset_id: selected, request: $("req").value})}));
 $("approve").onclick = () => act(() => api(`/api/runs/${run.run_id}/decision`, {method: "POST", body: JSON.stringify({decision: "approve"})}));
 $("reject").onclick = () => act(() => api(`/api/runs/${run.run_id}/decision`, {method: "POST", body: JSON.stringify({decision: "reject", reason: "Rejected in UI"})}));
-loadAssets().catch(e => { $("status").textContent = "error"; $("reason").textContent = e.message; });
+$("key").onchange = () => loadAssets().catch(e => { $("status").textContent = "error"; $("reason").textContent = e.message; });
+if ($("key").value) $("key").onchange();
 </script>
 </body>
 </html>

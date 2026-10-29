@@ -10,10 +10,11 @@ checks the draft, and waits for a planner to approve it before anything is writt
 
 ```bash
 python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt
-.venv/bin/uvicorn app.main:app --reload          # scripted model, no API key needed
-# open http://127.0.0.1:8000  (API key: planner-demo-key)
+APP_DEMO_KEYS=1 .venv/bin/uvicorn app.main:app --reload   # scripted model, no Anthropic key needed
+# APP_DEMO_KEYS=1 enables the demo keys planner-demo-key / viewer-demo-key; otherwise set APP_PLANNER_KEY and APP_VIEWER_KEY
+# open http://127.0.0.1:8000 and paste the planner key
 
-APP_LLM=anthropic ANTHROPIC_API_KEY=... .venv/bin/uvicorn app.main:app   # Claude Haiku 5.5
+APP_DEMO_KEYS=1 APP_LLM=anthropic ANTHROPIC_API_KEY=... .venv/bin/uvicorn app.main:app   # Claude Haiku 5.5
 ```
 
 ## The workflow

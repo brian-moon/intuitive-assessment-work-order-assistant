@@ -13,12 +13,16 @@ from .models import WorkOrderDraft
 EXPECTED_PRIORITY = {"high": "P1", "medium": "P2", "low": "P3"}
 
 
-def check_draft(draft: WorkOrderDraft, repo: Repository, now: datetime, stale_hours: float) -> list[dict]:
+def check_draft(draft: WorkOrderDraft, repo: Repository, now: datetime, stale_hours: float,
+                requested_asset: str) -> list[dict]:
     issues: list[dict] = []
 
     def add(severity: str, code: str, msg: str) -> None:
         issues.append({"severity": severity, "code": code, "message": msg})
 
+    if draft.asset_id != requested_asset:
+        add("blocking", "wrong_asset", f"Draft is for {draft.asset_id}, but the planner asked about {requested_asset}.")
+        return issues
     asset = repo.assets.get(draft.asset_id)
     if asset is None:
         add("blocking", "unknown_asset", f"Draft names an unknown asset {draft.asset_id!r}.")

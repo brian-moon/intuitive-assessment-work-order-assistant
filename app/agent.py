@@ -104,7 +104,7 @@ def build_graph(llm: LLM, toolbox: Toolbox, cmms: MockCMMS, settings, checkpoint
 
     def validate(state: RunState) -> dict:
         draft = WorkOrderDraft.model_validate(state["draft"])
-        issues = check_draft(draft, toolbox.repo, settings.now, settings.stale_after_hours)
+        issues = check_draft(draft, toolbox.repo, settings.now, settings.stale_after_hours, state["asset_id"])
         return {"issues": issues, "status": "awaiting_approval",
                 "events": _event(state, "validated", blocking=sum(i["severity"] == "blocking" for i in issues),
                                  warnings=sum(i["severity"] == "warning" for i in issues))}

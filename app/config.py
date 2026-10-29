@@ -30,8 +30,16 @@ class Settings:
     max_agent_steps: int = 6
     max_output_tokens: int = 1500
     cmms_timeout_s: float = 2.0
-    # API keys -> role. Demo values; a real deployment would use the company's identity provider.
-    api_keys: dict[str, str] = field(default_factory=lambda: {
-        os.environ.get("APP_PLANNER_KEY", "planner-demo-key"): "planner",
-        os.environ.get("APP_VIEWER_KEY", "viewer-demo-key"): "viewer",
-    })
+    # API keys -> role, from the environment. The fixed demo keys are used only when APP_DEMO_KEYS=1 is set
+    # explicitly (local demo, tests, CI); otherwise a missing key stops the app at startup. A real deployment would
+    # use the company's identity provider instead.
+    api_keys: dict[str, str] = field(default_factory=lambda: _api_keys())
+
+
+def _api_keys() -> dict[str, str]:
+    if os.environ.get("APP_DEMO_KEYS") == "1":
+        return {"planner-demo-key": "planner", "viewer-demo-key": "viewer"}
+    planner, viewer = os.environ.get("APP_PLANNER_KEY"), os.environ.get("APP_VIEWER_KEY")
+    if not planner or not viewer or planner == viewer:
+        raise RuntimeError("Set APP_PLANNER_KEY and APP_VIEWER_KEY (distinct values), or APP_DEMO_KEYS=1 for a local demo.")
+    return {planner: "planner", viewer: "viewer"}
