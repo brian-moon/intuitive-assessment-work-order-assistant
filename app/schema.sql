@@ -118,7 +118,7 @@ CREATE INDEX IF NOT EXISTS run_events_run ON run_events (run_id, seq);
 
 CREATE TABLE IF NOT EXISTS work_orders (
     work_order   text PRIMARY KEY,
-    run_id       text NOT NULL REFERENCES runs(run_id),
+    run_id       text NOT NULL UNIQUE REFERENCES runs(run_id),   -- one work order per run, whatever races
     asset_id     text NOT NULL REFERENCES assets(asset_id),
     priority     text NOT NULL,
     title        text NOT NULL,

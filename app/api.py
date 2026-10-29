@@ -130,8 +130,13 @@ def create_app(settings: Settings | None = None, llm: LLM | None = None, send=No
     def categories(_: dict = Depends(user)) -> list[dict]:
         return db.rows("SELECT * FROM machine_categories ORDER BY category")
 
+    last_scan = {"t": 0.0}
+
     @app.post("/api/scan")
     def rescan(_: dict = Depends(need("planner"))) -> dict:
+        if time.time() - last_scan["t"] < 10:
+            raise HTTPException(429, "A scan ran less than 10 seconds ago.")
+        last_scan["t"] = time.time()
         found = anomaly.scan(db, settings.now)
         return {"findings": len(found), "raised": notifier.alert(found)}
 
@@ -188,6 +193,10 @@ def create_app(settings: Settings | None = None, llm: LLM | None = None, send=No
             raise HTTPException(409, f"Run is {current['status']}; no decision is pending.")
         if body.decision == "approve" and not current["can_approve"]:
             raise HTTPException(409, "The draft has blocking issues; reject it or start a new run.")
+        # Claim the decision atomically: of two concurrent decisions on the same run, only one gets the row.
+        if not db.row("UPDATE runs SET status = 'deciding', updated_at = now() WHERE run_id = %s "
+                      "AND status = 'awaiting_approval' RETURNING run_id", run_id):
+            raise HTTPException(409, "Another decision on this run is already in progress.")
         return sse(pipeline.resume(run_id, {**body.model_dump(exclude_none=True), "by": u["name"]}))
 
     @app.get("/api/runs/{run_id}/trace")

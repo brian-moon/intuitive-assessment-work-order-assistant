@@ -293,8 +293,7 @@ class Pipeline:
                                "run.start")
 
     def resume(self, run_id: str, decision: dict) -> Iterator[dict]:
-        self.db.exec("UPDATE runs SET status = 'running', updated_at = now() WHERE run_id = %s", run_id)
-        yield from self._drive(run_id, Command(resume=decision), "run.resume")
+        yield from self._drive(run_id, Command(resume=decision), "run.resume")   # the API has already claimed the run
 
     def state(self, run_id: str) -> dict | None:
         snap = self.graph.get_state({"configurable": {"thread_id": run_id}})

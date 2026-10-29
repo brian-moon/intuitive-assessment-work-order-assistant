@@ -16,8 +16,6 @@ import ssl
 from collections.abc import Callable
 from email.message import EmailMessage
 
-from psycopg.errors import UniqueViolation
-
 from .db import Database
 from .faults import Faults
 
@@ -44,14 +42,13 @@ class Notifier:
     def __init__(self, db: Database, faults: Faults, public_url: str, send: Callable[[str, str, str], None] | None):
         self.db, self.faults, self.public_url, self.send = db, faults, public_url, send
 
-    def _record(self, key, channel, recipient, f, subject, status, error=None) -> bool:
-        try:
-            self.db.exec("INSERT INTO notifications (dedupe_key, channel, recipient, severity, asset_id, subject, "
-                         "status, error) VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
-                         key, channel, recipient, f["severity"], f["asset_id"], subject, status, error)
-            return True
-        except UniqueViolation:
-            return False
+    def _claim(self, key, channel, recipient, f, subject, status) -> int | None:
+        """Insert the notification row first; only the caller that inserted it may deliver. Concurrent scans of the
+        same finding therefore send at most one e-mail per recipient."""
+        r = self.db.row("INSERT INTO notifications (dedupe_key, channel, recipient, severity, asset_id, subject, status) "
+                        "VALUES (%s,%s,%s,%s,%s,%s,%s) ON CONFLICT (dedupe_key, channel, recipient) DO NOTHING RETURNING id",
+                        key, channel, recipient, f["severity"], f["asset_id"], subject, status)
+        return r["id"] if r else None
 
     def alert(self, findings: list[dict]) -> list[dict]:
         """Raise alerts for warning/critical findings. Returns what was newly recorded."""
@@ -63,7 +60,7 @@ class Notifier:
             key = f"anomaly:{f['asset_id']}:{f['metric']}:{f['ts'].isoformat()}:{f['severity']}"
             subject = (f"[{f['severity'].upper()}] {f['asset_id']} {f['metric']} = {f['value']:g} {f['unit']}"
                        + (" (stale data)" if f["stale"] else ""))
-            if f["severity"] == "critical" and self._record(key, "dashboard", "", f, subject, "shown"):
+            if f["severity"] == "critical" and self._claim(key, "dashboard", "", f, subject, "shown"):
                 raised.append({"channel": "dashboard", "subject": subject})
             for r in recipients:
                 if ORDER[f["severity"]] < ORDER[r["min_severity"]]:
@@ -72,6 +69,9 @@ class Notifier:
                         f"{f['ts'].isoformat()} (threshold {f['threshold']:g}).\n"
                         f"{'The telemetry is stale; confirm on site.' if f['stale'] else ''}\n\n"
                         f"Open the work-order assistant to draft and approve a work order: {self.public_url}\n")
+                nid = self._claim(key, "email", r["email"], f, subject, "pending")
+                if nid is None:
+                    continue                               # already handled by this or a concurrent scan
                 status, error = "disabled", None
                 if self.faults.smtp_unavailable:
                     status, error = "failed", "SMTP server unreachable (injected fault)"
@@ -81,7 +81,7 @@ class Notifier:
                         status = "sent"
                     except (smtplib.SMTPException, OSError) as e:
                         status, error = "failed", f"{type(e).__name__}: {e}"[:300]
-                if self._record(key, "email", r["email"], f, subject, status, error):
-                    raised.append({"channel": "email", "to": r["email"], "status": status, "error": error})
-                    log.info("alert email %s to %s: %s", status, r["email"], subject)
+                self.db.exec("UPDATE notifications SET status = %s, error = %s WHERE id = %s", status, error, nid)
+                raised.append({"channel": "email", "to": r["email"], "status": status, "error": error})
+                log.info("alert email %s to %s: %s", status, r["email"], subject)
         return raised
