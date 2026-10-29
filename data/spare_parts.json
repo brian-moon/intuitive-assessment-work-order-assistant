@@ -1,0 +1,11 @@
+[
+  {"part_no": "BRG-6309-2RS", "description": "Deep groove ball bearing 6309-2RS", "fits_types": ["centrifugal_pump", "induction_motor"], "on_hand": 2, "location": "Stores A-12", "lead_time_days": 3},
+  {"part_no": "SEAL-MS-45", "description": "Mechanical seal 45 mm", "fits_types": ["centrifugal_pump"], "on_hand": 0, "location": "Stores A-14", "lead_time_days": 10},
+  {"part_no": "CPL-GR-30", "description": "Grid coupling element 30", "fits_types": ["centrifugal_pump", "induction_motor"], "on_hand": 1, "location": "Stores A-03", "lead_time_days": 5},
+  {"part_no": "SEP-AO-110", "description": "Air-oil separator element", "fits_types": ["screw_compressor"], "on_hand": 1, "location": "Stores B-02", "lead_time_days": 7},
+  {"part_no": "OIL-SC-46", "description": "Screw compressor oil ISO VG 46 (20 L)", "fits_types": ["screw_compressor"], "on_hand": 4, "location": "Stores B-05", "lead_time_days": 2},
+  {"part_no": "THV-SC-75", "description": "Thermostatic valve 75 degC", "fits_types": ["screw_compressor"], "on_hand": 0, "location": "Stores B-02", "lead_time_days": 14},
+  {"part_no": "IDL-CV-89", "description": "Conveyor idler 89 mm", "fits_types": ["induction_motor"], "on_hand": 6, "location": "Stores A-20", "lead_time_days": 2},
+  {"part_no": "BRG-SP-7014", "description": "Spindle angular contact bearing set 7014", "fits_types": ["spindle"], "on_hand": 1, "location": "Stores C-01", "lead_time_days": 21},
+  {"part_no": "OIL-GR-220", "description": "Gear oil ISO VG 220 (20 L)", "fits_types": ["gearbox"], "on_hand": 3, "location": "Stores C-07", "lead_time_days": 2}
+]
