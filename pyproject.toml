@@ -6,6 +6,7 @@ requires-python = ">=3.11"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["."]
 markers = [
   "browser: Playwright browser test (needs a running server and Chromium)",
   "live: calls the real model; costs tokens",
