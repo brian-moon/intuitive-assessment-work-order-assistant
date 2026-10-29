@@ -1,10 +1,10 @@
 [
-  {"asset_id": "P-101", "name": "Cooling water pump 1", "type": "centrifugal_pump", "site": "Plant A", "line": "Utilities", "criticality": "high", "energy_sources": ["electrical", "hydraulic"]},
-  {"asset_id": "P-102", "name": "Cooling water pump 2", "type": "centrifugal_pump", "site": "Plant A", "line": "Utilities", "criticality": "medium", "energy_sources": ["electrical", "hydraulic"]},
-  {"asset_id": "C-201", "name": "Screw air compressor", "type": "screw_compressor", "site": "Plant A", "line": "Compressed air", "criticality": "high", "energy_sources": ["electrical", "pneumatic"]},
-  {"asset_id": "M-301", "name": "Conveyor drive motor", "type": "induction_motor", "site": "Plant A", "line": "Packaging", "criticality": "medium", "energy_sources": ["electrical", "mechanical"]},
-  {"asset_id": "S-401", "name": "CNC machining spindle", "type": "spindle", "site": "Plant B", "line": "Machining", "criticality": "high", "energy_sources": ["electrical", "mechanical"]},
-  {"asset_id": "H-501", "name": "Process chiller", "type": "chiller", "site": "Plant B", "line": "Utilities", "criticality": "medium", "energy_sources": ["electrical", "thermal"]},
-  {"asset_id": "G-601", "name": "Mixer gearbox", "type": "gearbox", "site": "Plant B", "line": "Mixing", "criticality": "low", "energy_sources": ["mechanical"]},
-  {"asset_id": "T-701", "name": "Distribution transformer", "type": "transformer", "site": "Plant B", "line": "Power", "criticality": "high", "energy_sources": ["electrical"]}
+  {"asset_id": "P-101", "name": "Cooling water pump 1", "category": "centrifugal_pump", "site": "Plant A", "line": "Utilities", "criticality": "high", "energy_sources": ["electrical", "hydraulic"]},
+  {"asset_id": "P-102", "name": "Cooling water pump 2", "category": "centrifugal_pump", "site": "Plant A", "line": "Utilities", "criticality": "medium", "energy_sources": ["electrical", "hydraulic"]},
+  {"asset_id": "C-201", "name": "Screw air compressor", "category": "screw_compressor", "site": "Plant A", "line": "Compressed air", "criticality": "high", "energy_sources": ["electrical", "pneumatic"]},
+  {"asset_id": "M-301", "name": "Conveyor drive motor", "category": "induction_motor", "site": "Plant A", "line": "Packaging", "criticality": "medium", "energy_sources": ["electrical", "mechanical"]},
+  {"asset_id": "S-401", "name": "CNC machining spindle", "category": "spindle", "site": "Plant B", "line": "Machining", "criticality": "high", "energy_sources": ["electrical", "mechanical"]},
+  {"asset_id": "H-501", "name": "Process chiller", "category": "chiller", "site": "Plant B", "line": "Utilities", "criticality": "medium", "energy_sources": ["electrical", "thermal"]},
+  {"asset_id": "G-601", "name": "Mixer gearbox", "category": "gearbox", "site": "Plant B", "line": "Mixing", "criticality": "low", "energy_sources": ["mechanical"]},
+  {"asset_id": "T-701", "name": "Distribution transformer", "category": "transformer", "site": "Plant B", "line": "Power", "criticality": "high", "energy_sources": ["electrical"]}
 ]

@@ -1,0 +1,22 @@
+{
+  "centrifugal_pump": {"label": "Centrifugal pump", "max_data_age_h": 12, "evidence_tolerance": 0.0,
+    "metrics": {"vibration_rms": {"unit": "mm/s", "direction": "high", "warning": 4.5, "critical": 7.1},
+                "bearing_temp": {"unit": "degC", "direction": "high", "warning": 80, "critical": 90}}},
+  "screw_compressor": {"label": "Screw compressor", "max_data_age_h": 12, "evidence_tolerance": 0.0,
+    "metrics": {"discharge_temp": {"unit": "degC", "direction": "high", "warning": 105, "critical": 110},
+                "oil_pressure": {"unit": "bar", "direction": "low", "warning": 2.5, "critical": 2.0}}},
+  "induction_motor": {"label": "Induction motor", "max_data_age_h": 12, "evidence_tolerance": 0.0,
+    "metrics": {"current": {"unit": "A", "direction": "high", "warning": 36.0, "critical": 40.0},
+                "winding_temp": {"unit": "degC", "direction": "high", "warning": 110, "critical": 130}}},
+  "spindle": {"label": "Machining spindle", "max_data_age_h": 8, "evidence_tolerance": 0.0,
+    "metrics": {"vibration_rms": {"unit": "mm/s", "direction": "high", "warning": 3.5, "critical": 4.5},
+                "spindle_temp": {"unit": "degC", "direction": "high", "warning": 65, "critical": 70}}},
+  "chiller": {"label": "Chiller", "max_data_age_h": 24, "evidence_tolerance": 0.0,
+    "metrics": {"supply_temp": {"unit": "degC", "direction": "high", "warning": 8.5, "critical": 9.5},
+                "compressor_current": {"unit": "A", "direction": "high", "warning": 58, "critical": 62}}},
+  "gearbox": {"label": "Gearbox", "max_data_age_h": 48, "evidence_tolerance": 0.0,
+    "metrics": {"oil_temp": {"unit": "degC", "direction": "high", "warning": 85, "critical": 95},
+                "vibration_rms": {"unit": "mm/s", "direction": "high", "warning": 5.0, "critical": 7.0}}},
+  "transformer": {"label": "Transformer", "max_data_age_h": 24, "evidence_tolerance": 0.0,
+    "metrics": {"oil_temp": {"unit": "degC", "direction": "high", "warning": 85, "critical": 95}}}
+}

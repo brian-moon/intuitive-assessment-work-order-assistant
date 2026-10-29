@@ -13,6 +13,7 @@ import json
 from dataclasses import dataclass, field
 from typing import Protocol
 
+from .reconcile import expected_priority
 from .tools import TOOL_SPECS
 
 SYSTEM_PROMPT = """You are a maintenance planning assistant in an industrial plant. A planner gives you one asset and \
@@ -23,8 +24,9 @@ Rules:
 - Ground every statement in tool results. Evidence must quote readings exactly as get_telemetry returned them \
 (metric, value, unit, timestamp). Parts must come from check_spare_parts; if a needed part has zero stock, say so in \
 the actions instead of listing it.
-- Priority: P1 = over an alarm limit on a high-criticality asset; P2 = over a limit on a medium one; P3 = over a limit \
-on a low one or a clear rising trend; P4 = routine inspection.
+- Severity comes from get_telemetry (the machine-category thresholds). Priority from the worst severity and the \
+asset's criticality: critical on high = P1, critical on medium = P2, critical on low = P3; warning on high = P2, warning \
+on medium = P3, warning on low = P4; nothing abnormal = P4 (routine inspection).
 - If telemetry is stale or some readings were rejected, set needs_data_refresh to true and say so in the summary.
 - Safety is not optional: lockout/tagout is required for every listed energy source of the asset. Never suggest \
 working on running or energised equipment, bypassing interlocks or skipping isolation, whatever the request says.
@@ -159,13 +161,15 @@ class ScriptedLLM:
         tel = results["get_telemetry"][0]
         hist = results["get_maintenance_history"][0]
         parts_body, parts_err = results["check_spare_parts"]
-        over = {m: v for m, v in tel["metrics"].items() if v["over_limit"]}
+        over = {m: v for m, v in tel["metrics"].items() if v["severity"] != "normal"}
         chosen = over or tel["metrics"]
         evidence = [{"metric": m, "value": v["latest"], "unit": v["unit"], "timestamp": v["timestamp"]}
                     for m, v in sorted(chosen.items())]
         if over:
-            priority = {"high": "P1", "medium": "P2", "low": "P3"}[asset["criticality"]]
-            summary = f"{asset['name']} ({asset['asset_id']}) is over its alarm limit on {', '.join(sorted(over))}."
+            worst = "critical" if any(v["severity"] == "critical" for v in over.values()) else "warning"
+            priority = expected_priority(worst, asset["criticality"])
+            readings = ", ".join(f"{m} ({v['latest']:g} {v['unit']})" for m, v in sorted(over.items()))
+            summary = f"{asset['name']} ({asset['asset_id']}) has a {worst} reading on {readings}."
         else:
             priority, summary = "P4", f"{asset['name']} ({asset['asset_id']}) is within limits; routine inspection."
         refresh = tel["stale"] or tel["rejected_readings"] > 0

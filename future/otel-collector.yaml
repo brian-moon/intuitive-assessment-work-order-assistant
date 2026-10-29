@@ -1,0 +1,24 @@
+# FOR FUTURE DEVELOPMENT (not used by the demo).
+# A starting OpenTelemetry Collector config: receive the app's OTLP/HTTP spans and forward them to a tracing backend.
+# Run the app with OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318 to send spans here.
+receivers:
+  otlp:
+    protocols:
+      http:
+        endpoint: 0.0.0.0:4318
+processors:
+  batch: {}
+  attributes/redact:
+    actions:
+      - key: gen_ai.prompt          # never export prompt text from the plant floor
+        action: delete
+exporters:
+  otlphttp/backend:
+    endpoint: http://tempo:4318     # Grafana Tempo, Jaeger, Arize Phoenix or Langfuse all accept OTLP
+  debug: {}
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [attributes/redact, batch]
+      exporters: [otlphttp/backend, debug]

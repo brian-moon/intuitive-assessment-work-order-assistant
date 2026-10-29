@@ -1,9 +1,9 @@
-"""The agent's tools: four reads and one proposal. No tool writes anything; the write is a separate,
-approval-gated step (see agent.py).
+"""The agent's tools: four reads from the database and one proposal. No tool writes anything; the write happens in a
+separate, approval-gated phase (see pipeline.py).
 
-Token economy: tools return compact summaries (latest value and trend per metric, the last three work orders,
-only parts that fit the asset type), never raw tables. Errors come back as short ``is_error`` results the model
-can act on, never as stack traces.
+Token economy: tools return compact summaries (latest value, its severity against the category thresholds and a short
+trend per metric; the last three work orders; only parts that fit the category), never raw tables. Errors come back
+as short ``is_error`` results the model can act on, never as stack traces.
 """
 from __future__ import annotations
 
@@ -13,7 +13,8 @@ from datetime import datetime
 
 from pydantic import ValidationError
 
-from .data_access import Repository
+from .anomaly import classify_asset
+from .db import Database
 from .faults import Faults
 from .models import SparePart, WorkOrderDraft
 
@@ -25,15 +26,15 @@ def _obj(props: dict, required: list[str]) -> dict:
 
 
 TOOL_SPECS: list[dict] = [
-    {"name": "get_asset", "description": "Asset master data: name, type, site, criticality and energy sources.",
+    {"name": "get_asset", "description": "Asset master data: name, category, site, criticality and energy sources.",
      "input_schema": _obj({"asset_id": ASSET_ID}, ["asset_id"])},
     {"name": "get_telemetry",
-     "description": "Latest reading, alarm limit and short trend per metric, whether the data is stale, and how many "
-                    "readings were rejected as malformed.",
+     "description": "Per metric: latest reading, its severity against the machine-category thresholds, the thresholds "
+                    "and a short trend; whether the data is stale for this category; how many readings were rejected.",
      "input_schema": _obj({"asset_id": ASSET_ID}, ["asset_id"])},
     {"name": "get_maintenance_history", "description": "The last three work orders for the asset, newest first.",
      "input_schema": _obj({"asset_id": ASSET_ID}, ["asset_id"])},
-    {"name": "check_spare_parts", "description": "Spare parts that fit this asset type, with stock on hand and lead time.",
+    {"name": "check_spare_parts", "description": "Spare parts that fit this asset's category, with stock and lead time.",
      "input_schema": _obj({"asset_id": ASSET_ID}, ["asset_id"])},
     {"name": "propose_work_order",
      "description": "Submit the work-order draft for planner review. Call it exactly once, at the end. Evidence must "
@@ -73,19 +74,23 @@ class ToolResult:
     proposal: WorkOrderDraft | None = None
 
 
+def _z(ts: datetime) -> str:
+    return ts.isoformat().replace("+00:00", "Z")
+
+
 class Toolbox:
-    def __init__(self, repo: Repository, faults: Faults, now: datetime, stale_hours: float):
-        self.repo, self.faults, self.now, self.stale_hours = repo, faults, now, stale_hours
+    def __init__(self, db: Database, faults: Faults, now: datetime):
+        self.db, self.faults, self.now = db, faults, now
 
     def run(self, name: str, args: dict) -> ToolResult:
         try:
             if name == "propose_work_order":
                 draft = WorkOrderDraft.model_validate(args)
-                return ToolResult("Draft received; it goes to the planner for approval.", proposal=draft)
+                return ToolResult("Draft received; it goes to reconciliation and then to the planner.", proposal=draft)
             if name not in READ_TOOLS:
                 raise ToolFailure(f"Unknown tool {name!r}.")
             asset_id = args.get("asset_id")
-            if asset_id not in self.repo.assets:
+            if not isinstance(asset_id, str) or self.db.asset(asset_id) is None:
                 raise ToolFailure(f"No asset with id {asset_id!r}.")
             data = getattr(self, name)(asset_id)
             return ToolResult(json.dumps(data, ensure_ascii=False, separators=(",", ":"), default=str))
@@ -95,38 +100,31 @@ class Toolbox:
         except ToolFailure as e:
             return ToolResult(str(e), is_error=True)
 
-    # --- read tools -----------------------------------------------------------------------------------------
+    # --- read tools -----------------------------------------------------------------------------------------------
     def get_asset(self, asset_id: str) -> dict:
-        return self.repo.assets[asset_id].model_dump()
+        return self.db.asset(asset_id).model_dump()
 
     def get_telemetry(self, asset_id: str) -> dict:
         if self.faults.telemetry_unavailable:
             raise ToolFailure("Historian unavailable (connection refused). Telemetry cannot be read right now.")
         metrics = {}
-        for metric, latest in self.repo.latest_by_metric(asset_id).items():
-            series = [r for r in self.repo.readings_for(asset_id) if r.metric == metric]
-            metrics[metric] = {
-                "latest": latest.value, "unit": latest.unit, "timestamp": latest.timestamp.isoformat().replace("+00:00", "Z"),
-                "alarm_limit": latest.alarm_limit, "over_limit": latest.over_limit,
-                "trend": [r.value for r in series[-3:]],
-            }
-        last = self.repo.last_reading_at(asset_id)
-        return {"asset_id": asset_id, "metrics": metrics,
-                "last_reading_at": last.isoformat().replace("+00:00", "Z") if last else None,
-                "stale": self.repo.is_stale(asset_id, self.now, self.stale_hours),
-                "rejected_readings": len(self.repo.quarantined_for(asset_id))}
+        for f in classify_asset(self.db, asset_id, self.now):
+            metrics[f["metric"]] = {"latest": f["value"], "unit": f["unit"], "timestamp": _z(f["ts"]),
+                                    "severity": f["severity"], "warning": f["warning"], "critical": f["critical"],
+                                    "direction": f["direction"], "trend": self.db.trend(asset_id, f["metric"])}
+        last = self.db.last_reading_at(asset_id)
+        return {"asset_id": asset_id, "metrics": metrics, "last_reading_at": _z(last) if last else None,
+                "stale": self.db.is_stale(asset_id, self.now), "rejected_readings": self.db.rejections_for(asset_id)}
 
     def get_maintenance_history(self, asset_id: str) -> dict:
-        rows = sorted((h for h in self.repo.history if h.asset_id == asset_id), key=lambda h: h.date, reverse=True)
-        return {"asset_id": asset_id, "work_orders": [h.model_dump() for h in rows[:3]]}
+        return {"asset_id": asset_id, "work_orders": self.db.history(asset_id)}
 
     def check_spare_parts(self, asset_id: str) -> dict:
-        asset = self.repo.assets[asset_id]
-        payload = [p.model_dump() for p in self.repo.parts.values() if asset.type in p.fits_types]
+        payload = self.db.parts_for(self.db.asset(asset_id).category)
         if self.faults.parts_invalid_response:
             payload = [{"part_no": p["part_no"], "on_hand": "unknown"} for p in payload]  # contract broken upstream
         try:
-            parts = [SparePart.model_validate(p) for p in payload]
+            parts = [SparePart.model_validate({"location": "-", **p}) for p in payload]
         except ValidationError as e:
             raise ToolFailure("Stores service returned an invalid response; stock levels are unknown.") from e
         return {"asset_id": asset_id, "parts": [

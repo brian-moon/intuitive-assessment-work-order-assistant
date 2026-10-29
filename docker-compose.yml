@@ -1,0 +1,14 @@
+# Local PostgreSQL for development and tests. The API itself runs with uvicorn (see README).
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: wo
+      POSTGRES_PASSWORD: wo-dev
+      POSTGRES_DB: wo
+    ports:
+      - "127.0.0.1:5440:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U wo"]
+      interval: 2s
+      retries: 20
