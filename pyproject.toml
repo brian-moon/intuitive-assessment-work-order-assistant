@@ -1,0 +1,17 @@
+[project]
+name = "workorder-assistant"
+version = "0.1.0"
+description = "AI agent that turns an equipment alarm into a reviewed maintenance work order"
+requires-python = ">=3.11"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+  "browser: Playwright browser test (needs a running server and Chromium)",
+  "live: calls the real model; costs tokens",
+]
+addopts = "-m 'not live'"
+
+[tool.pyright]
+venvPath = "."
+venv = ".venv"
