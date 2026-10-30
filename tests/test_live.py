@@ -106,3 +106,19 @@ def test_live_clock_shifts_the_seed_data_to_now(make_client, settings):
     assets = c.get("/api/dashboard", headers=auth(c, "viewer")).json()["assets"]
     crit = {a["asset_id"] for a in assets if a["severity"] == "critical"}
     assert {"P-101", "C-201", "M-301", "S-401"} <= crit
+
+
+def test_live_streams_are_capped_per_user(client):
+    import threading as th
+    planner = auth(client, "planner")
+    results = []
+
+    def open_one():
+        results.append(client.get("/api/live/stream?seconds=2", headers=planner).status_code)
+    threads = [th.Thread(target=open_one) for _ in range(4)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert sorted(results) == [200, 200, 200, 429]
+    assert client.get("/api/live/stream?seconds=1", headers=planner).status_code == 200    # slots were released

@@ -208,7 +208,9 @@ def create_app(settings: Settings | None = None, llm: LLM | None = None, send=No
                 "unit": r["unit"], "ts": r["ts"], "source": r["source"],
                 "severity": severity_of(r["asset_id"], r["metric"], r["value"]), "backlog": backlog}
 
-    streams: dict[str, int] = {"total": 0}     # each open stream holds a worker thread: cap them
+    # Each open stream holds a worker thread, so they are capped. A slot carries its expiry, so one whose release
+    # never ran (client gone before the first byte) frees itself; release is idempotent.
+    stream_slots: dict[str, tuple[str, float]] = {}
     stream_lock = threading.Lock()
 
     @app.get("/api/live/stream")
@@ -238,20 +240,22 @@ def create_app(settings: Settings | None = None, llm: LLM | None = None, send=No
                     beat = time.time()
                     yield {"type": "heartbeat", "now": settings.now, "simulator": sim.state()}
                 time.sleep(1)
-        key = u["name"]
+        slot = uuid.uuid4().hex
         with stream_lock:
-            if streams["total"] >= 20 or streams.get(key, 0) >= 3:
+            now_ = time.time()
+            for k in [k for k, (_, exp) in stream_slots.items() if exp < now_]:
+                del stream_slots[k]
+            mine = sum(1 for who, _ in stream_slots.values() if who == u["name"])
+            if len(stream_slots) >= 20 or mine >= 3:
                 raise HTTPException(429, "Too many live streams open; close another tab.")
-            streams["total"] += 1
-            streams[key] = streams.get(key, 0) + 1
+            stream_slots[slot] = (u["name"], now_ + seconds + 30)
 
         def counted():
             try:
                 yield from gen()
             finally:
                 with stream_lock:
-                    streams["total"] -= 1
-                    streams[key] -= 1
+                    stream_slots.pop(slot, None)
         return sse(counted())
 
     @app.get("/api/history")
