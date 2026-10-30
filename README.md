@@ -323,6 +323,25 @@ were built with an AI coding assistant (see AI usage).
 - **Operations:** OTLP export to a collector by default (`future/otel-collector.yaml`), alerting on evaluation
   regressions, and the live evaluation in CI with a repository secret.
 
+### Future development: MoonPlane and TrustPlane
+
+The next step is not more code in this repository but running the workflow on two platforms I built and operate,
+each with a live demo (guest sign-in):
+
+- **MoonPlane** (https://moonplane.itsmoon.com), an agent platform: products are declared as manifests, released
+  only through an evaluation gate, and call models through a model gateway. Here the work-order assistant would
+  become one MoonPlane product: the routing golden set and the live evaluation become its release gate; the local
+  tier goes through the gateway (which already speaks the Messages API this app uses, with per-client tokens and
+  queueing); sign-in and roles move to the platform's Keycloak; and maintenance manuals become a retrieval
+  collection for the agent, with per-document access.
+- **TrustPlane** (https://trustplane.itsmoon.com), governance observability: an append-only, hash-chained ledger of
+  spans and governance events, a per-request reconstruction of every decision, an evaluation board and alerts. This
+  app already emits TrustPlane's event types (`app/trustplane.py`: guardrail refusals, every routing decision, every
+  planner decision, evaluation runs and cases); it is built and tested but not connected in this repository.
+  Connecting it is configuration (`TRUSTPLANE_URL`, `TRUSTPLANE_TOKEN`), after which an auditor could reconstruct why
+  a given work order exists, a drop in the nightly evaluation would raise an alert, and spend on the paid tier would
+  be visible per run.
+
 ## Deliverables
 
 | Asked for | Where |
@@ -334,13 +353,21 @@ were built with an AI coding assistant (see AI usage).
 | AI evaluation dataset, scoring, executable evaluation | `evals/cases.jsonl`, `evals/run_eval.py`, `evals/thresholds.json` |
 | Injected failures | Admin fault switches; stale and rejected data in the seed; unsafe requests; flawed stand-in models |
 | Diagnostics | per-run execution history, OpenTelemetry traces, logs, screenshots and reports in `reports/` |
-| Test and evaluation reports | `reports/` (evaluation reports, browser screenshots) |
+| Test and evaluation reports | `reports/tests.md` (test report), `reports/eval-*` (evaluation reports), browser screenshots |
 | CI configuration and explanation | `.github/workflows/ci.yml`, CI section above |
 | Commit history | `git log` |
-| More time | section above |
+| More time | section above, including the path onto MoonPlane and TrustPlane |
 
 ## AI usage
 
 Built with an AI coding assistant (Claude Code) as the brief requires, under my direction: I set the scenario, the
 architecture, the model choice and the ladder thresholds, reviewed the code and tests, and directed every change,
 including the fixes from the first live evaluation. The runtime agent uses Claude Haiku 5.5.
+
+## About the author
+
+Il Min Brian Moon, https://home.itsmoon.com. Besides MoonPlane and TrustPlane above: an open-source contribution to
+PdfCraft, an open-source PDF editor written in Rust. Korean (Hangul) file names and tab titles were drawn as empty
+boxes because the interface had no Hangul font fallback; the fix adds one (with a test that the chosen system font
+really covers Hangul) and was merged upstream and shipped in v0.12.0:
+https://github.com/storytold/pdfcraft/pull/2872 (2 commits).
