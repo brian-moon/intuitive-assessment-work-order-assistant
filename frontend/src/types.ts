@@ -18,6 +18,7 @@ export interface Dashboard {
   work_orders: { work_order: string; asset_id: string; priority: string; title: string; cmms_status: string; created_at: string }[]
   rejected_rows: { source: string; asset_id: string | null; reason: string }[]
   email: 'enabled' | 'disabled'
+  now: string; live_clock: boolean; simulator: SimState
 }
 
 export type PhaseStatus = 'running' | 'done' | 'warning' | 'critical' | 'failed' | 'skipped' | 'waiting'
@@ -41,3 +42,18 @@ export interface NotificationRow {
   id: number; channel: string; recipient: string | null; severity: Severity; asset_id: string; subject: string
   status: string; error: string | null; created_at: string; acknowledged_at: string | null
 }
+
+export interface SimState {
+  enabled: boolean; rate: number; unit: 'minute' | 'hour'; mix: Record<'normal' | 'warning' | 'critical', number>
+  updated_by: string | null; updated_at: string; events_last_hour: number; last_event_at: string | null; max_per_minute: number
+}
+export interface Reading {
+  id: number; asset_id: string; metric: string; value: number; unit: string; ts: string; source: string
+  severity: Severity; backlog?: boolean
+}
+export type LiveEvent =
+  | ({ type: 'reading' } & Reading)
+  | { type: 'alert'; id: number; channel: string; recipient: string | null; severity: Severity; asset_id: string
+      subject: string; status: string; created_at: string }
+  | { type: 'heartbeat'; now: string; simulator: SimState }
+export interface Branding { name: string; subtitle: string; logo: string | null; deployment: string }

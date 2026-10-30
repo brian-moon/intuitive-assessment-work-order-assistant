@@ -23,30 +23,43 @@ Open **http://localhost:8790** and sign in:
 | `admin` | `admin-demo` | everything a planner can, plus alert recipients and fault injection |
 | `viewer` | `viewer-demo` | read only |
 
-**Use Claude.** Without a key the app runs on a deterministic demo model (labelled as such on the Governance screen),
-so everything can be clicked through offline. To run the real agent, put your own key in a `.env` file next to
-`docker-compose.yml` (no key ships with this repository) and restart:
+**Settings** live in one file. Copy the template, fill in what you need, restart:
 
 ```bash
-echo "ANTHROPIC_API_KEY=sk-ant-..." > .env
+cp .env.example .env        # port, Claude key, alert e-mail and Gmail, simulator, logo; each line is commented
 docker compose up -d
 ```
 
-Start again from the seed data with `docker compose down -v`. Ports: 8790 (app) and 5440 (PostgreSQL), both bound to
+- **Claude**: `ANTHROPIC_API_KEY=` your own key (none ships with this repository). Without it a deterministic demo
+  model drafts, labelled "Demo model" in the header, so everything can still be clicked through offline.
+- **Who gets critical alerts**: `ALERT_EMAILS="Plant Admin <admin@example.com>"`, plus `SMTP_*` to actually send
+  (Gmail: `smtp.gmail.com` and an app password). More recipients can be added on the Admin screen, which also shows
+  the effective configuration and sends a test alert.
+- **Port**: `APP_PORT=8790`.
+
+Start again from the seed data with `docker compose down -v`. Both ports (app, PostgreSQL 5440) are bound to
 localhost.
 
 ### A five-minute tour
 
-1. Sign in as `planner`. The red banner lists the critical alerts found in the seed telemetry.
-2. **Dashboard** → P-101 (vibration over its critical limit) → **Run pipeline**. Each phase streams in as it runs:
-   safety check, asset rules, data quality, anomaly detection, alert, the agent's tool calls, reconciliation, routing,
-   planner approval.
-3. Read the draft (every evidence row quotes a recorded reading), then **Approve**. The work order is generated and
-   exported to the mock CMMS.
-4. **Governance** shows the controls at work: the model ladder and its thresholds, where drafts ended up and why,
+1. Sign in as `planner`. The red banner blinks while critical alerts are open (the tab title flashes too; the bell
+   in the header adds a sound).
+2. **Dashboard, Live**: asset cards by status, a live readings feed, and the **telemetry simulator**: switch it on and
+   set events per minute or per hour; each event is a random machine and metric with a random normal / warning /
+   critical status. Critical readings raise the banner, a toast and the alert e-mails as they arrive.
+   **History** shows any past window (1 h to 30 days, or custom): a summary per asset, or charts per metric with the
+   warning and critical lines, and the alerts, runs and work orders of that window.
+3. P-101 → **Run** → **Run pipeline**. Each phase streams in as it runs. Only the phase marked **LLM** (the agent's
+   draft) calls a model; the **critic** is reconciliation, rule-based code. The **Reconciliation rules** card beside
+   the draft shows every rule, the parameter that applies to this machine category, whether the draft passed it, and
+   the confidence arithmetic that decides the routing.
+4. Read the draft (every evidence row quotes a recorded reading), then **Approve**. The work order is generated and
+   exported to the mock CMMS. Every screen has its own URL: the browser's back and forward arrows work and return
+   to the same scroll position.
+5. **Governance** shows the controls at work: the model ladder and its thresholds, where drafts ended up and why,
    what the guardrails stopped, the planners' decisions, alert delivery, cost per tier, the latest evaluation, and
    whether telemetry reaches the observability backend.
-5. Try the failure paths:
+6. Try the failure paths:
    - Request "replace the bearing while it is running": refused before any model call.
    - S-401: its telemetry is stale, so the draft must say so.
    - As `admin` (Admin tab): register an alert recipient, or switch on a fault (historian down, stores invalid
@@ -82,6 +95,12 @@ approval                                     human in the loop; the pause is che
 generate → export                            numbered work order, mock CMMS; a timeout keeps it for a retry
 ```
 
+**Where the model runs.** One phase, `agent_draft`, calls a model: it reads the asset, telemetry, history and parts
+through tools and proposes a draft. Everything before it (safety guard, thresholds, data quality, alerting) and after
+it (reconciliation, routing, approval, generation, export) is deterministic code. Reconciliation is the **critic**: a
+rule-based verifier, not a second model, because each check (is this reading in the records, does isolation cover every
+energy source) has an exact answer. It produces the confidence the router uses.
+
 The pipeline is an explicit LangGraph state machine (`app/pipeline.py`). Every phase emits an event that is
 streamed to the browser (SSE), stored as the run's execution history (`run_events`), and recorded as an
 OpenTelemetry span with GenAI semantic-convention attributes on model calls.
@@ -98,7 +117,8 @@ OpenTelemetry span with GenAI semantic-convention attributes on model calls.
 | `app/safety.py` | the pre-model request guard |
 | `app/db.py`, `app/schema.sql` | PostgreSQL store; source rows validated on load, rejects kept with the reason |
 | `app/observability.py`, `app/trustplane.py` | OpenTelemetry tracing and governance events |
-| `frontend/` | React + TypeScript (Vite): dashboard, live run, governance, admin |
+| `app/simulator.py` | live telemetry simulator (adjustable rate, random machine and status) |
+| `frontend/` | React + TypeScript (Vite): live and history dashboard, run, governance, admin |
 
 ### Model ladder
 
@@ -176,13 +196,13 @@ fail-open and lost events are counted on the Governance screen.
 
 ## Configuration
 
-| Variable | Default | Purpose |
-|---|---|---|
-| `ANTHROPIC_API_KEY` | none | enables the Claude tier |
-| `LOCAL_LLM_BASE_URL`, `LOCAL_LLM_MODEL`, `LOCAL_LLM_TOKEN` | none, `qwen3.5:9b` | enables the local tier |
-| `APP_LLM` | `auto` | `auto` = every configured tier; `frontier` = skip local; `scripted` = demo model |
-| `APP_DEMO_USERS` / `APP_USERS` | `1` in compose | demo users, or `name:password:role,...` |
-| `SMTP_HOST`, `SMTP_USER`, `SMTP_PASSWORD` | none | alert e-mail; unset = recorded as disabled |
-| `APP_ROUTING` | `data/routing.json` | ladder thresholds |
+Every setting is in `.env.example`, commented: port, models, users, alert e-mail and SMTP (cooldown included), the
+simulator's start-up state, and branding. Thresholds of the model ladder are in `data/routing.json`; machine-category
+thresholds in `data/categories.json`.
 
-See `.env.example` and `deploy/assessment.env.example`.
+**Branding.** Put a logo file in `branding/` (not committed; mounted read-only) and set `APP_BRAND_LOGO`,
+`APP_BRAND_NAME` and `APP_BRAND_SUBTITLE`; the header and sign-in page use them.
+
+**Live data.** The clock is real; the seed data is shifted at first start so its newest reading is just before
+start-up (the demo opens with the same alarms, then the data ages and the simulator adds new readings). Tests and the
+evaluation pin the clock (`APP_NOW`) so their answers never change.

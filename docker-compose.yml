@@ -1,6 +1,6 @@
 # docker compose up --build   ->   http://localhost:8790   (users planner / planner-demo, admin / admin-demo, viewer / viewer-demo)
-# Put ANTHROPIC_API_KEY=... in a .env file next to this one to use Claude Haiku 5.5; without it the app runs on the
-# labelled demo model. docker compose down -v starts again from the seed data.
+# Settings (port, Claude key, alert e-mail, simulator, logo): cp .env.example .env, edit, docker compose up -d.
+# docker compose down -v starts again from the seed data.
 services:
   db:
     image: postgres:16
@@ -32,13 +32,27 @@ services:
       APP_MODEL: ${APP_MODEL:-claude-haiku-5-5}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       APP_DEPLOYMENT: ${APP_DEPLOYMENT:-assessment}
-      APP_PUBLIC_URL: http://localhost:8790
+      APP_PUBLIC_URL: ${APP_PUBLIC_URL:-http://localhost:${APP_PORT:-8790}}
+      LOCAL_LLM_BASE_URL: ${LOCAL_LLM_BASE_URL:-}
+      LOCAL_LLM_MODEL: ${LOCAL_LLM_MODEL:-qwen3.5:9b}
+      LOCAL_LLM_TOKEN: ${LOCAL_LLM_TOKEN:-}
+      ALERT_EMAILS: ${ALERT_EMAILS:-}
+      ALERT_EMAIL_COOLDOWN_MIN: ${ALERT_EMAIL_COOLDOWN_MIN:-15}
       SMTP_HOST: ${SMTP_HOST:-}
       SMTP_PORT: ${SMTP_PORT:-587}
       SMTP_USER: ${SMTP_USER:-}
       SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM: ${SMTP_FROM:-}
+      SIM_AUTOSTART: ${SIM_AUTOSTART:-0}
+      SIM_RATE: ${SIM_RATE:-6}
+      SIM_UNIT: ${SIM_UNIT:-minute}
+      APP_BRAND_NAME: ${APP_BRAND_NAME:-Work-order assistant}
+      APP_BRAND_SUBTITLE: ${APP_BRAND_SUBTITLE:-Maintenance operations}
+      APP_BRAND_LOGO: ${APP_BRAND_LOGO:-}
+    volumes:
+      - ./branding:/app/branding:ro
     ports:
-      - "127.0.0.1:8790:8790"
+      - "127.0.0.1:${APP_PORT:-8790}:8790"
 
 volumes:
   pgdata:

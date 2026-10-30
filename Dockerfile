@@ -15,6 +15,7 @@ COPY app/ app/
 COPY data/ data/
 COPY evals/ evals/
 COPY reports/ reports/
+RUN mkdir -p branding
 COPY --from=web /web/dist frontend/dist
 RUN useradd --uid 10001 --no-create-home appuser && chown -R appuser /app/reports
 USER appuser

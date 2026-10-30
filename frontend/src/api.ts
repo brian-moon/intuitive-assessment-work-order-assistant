@@ -49,3 +49,23 @@ export async function stream(path: string, session: Session, body: unknown, onEv
     }
   }
 }
+
+/** GET Server-Sent Events (with the bearer token, which EventSource cannot send). Resolves when the stream ends. */
+export async function listen<T>(path: string, session: Session, onEvent: (e: T) => void, signal: AbortSignal) {
+  const r = await fetch(path, { headers: { Authorization: `Bearer ${session.token}`, Accept: 'text/event-stream' }, signal })
+  if (!r.ok || !r.body) await fail(r)
+  const reader = r.body!.getReader()
+  const dec = new TextDecoder()
+  let buf = ''
+  for (;;) {
+    const { value, done } = await reader.read()
+    if (done) break
+    buf += dec.decode(value, { stream: true })
+    let i
+    while ((i = buf.indexOf('\n\n')) >= 0) {
+      const chunk = buf.slice(0, i); buf = buf.slice(i + 2)
+      const line = chunk.split('\n').find((l) => l.startsWith('data: '))
+      if (line) onEvent(JSON.parse(line.slice(6)) as T)
+    }
+  }
+}

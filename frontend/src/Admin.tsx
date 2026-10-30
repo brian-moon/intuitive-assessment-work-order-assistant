@@ -15,11 +15,14 @@ export default function Admin({ session }: { session: Session }) {
   const [minSeverity, setMinSeverity] = useState<'critical' | 'warning'>('critical')
   const [message, setMessage] = useState('')
   const [faults, setFaults] = useState<Record<string, boolean>>({})
+  const [config, setConfig] = useState<Record<string, unknown> | null>(null)
+  const [testResult, setTestResult] = useState('')
 
   const load = useCallback(async () => {
     setRecipients(await api<Recipient[]>('/api/admin/recipients', session))
     setLog(await api<NotificationRow[]>('/api/notifications', session))
     setFaults(await api<Record<string, boolean>>('/api/admin/faults', session))
+    setConfig(await api<Record<string, unknown>>('/api/admin/config', session))
   }, [session])
   useEffect(() => { load().catch((e) => setMessage((e as Error).message)) }, [load])
 
@@ -33,6 +36,13 @@ export default function Admin({ session }: { session: Session }) {
   async function remove(id: number) { await api(`/api/admin/recipients/${id}`, session, { method: 'DELETE' }); load() }
   async function toggle(k: string) {
     setFaults(await api<Record<string, boolean>>('/api/admin/faults', session, { method: 'PUT', body: JSON.stringify({ [k]: !faults[k] }) }))
+  }
+  async function testEmail() {
+    setTestResult('Sending…')
+    try {
+      const r = await api<{ results: { to: string; status: string; error: string | null }[] }>('/api/admin/test-alert', session, { method: 'POST' })
+      setTestResult(r.results.map((x) => `${x.to}: ${x.status}${x.error ? ` (${x.error})` : ''}`).join('; ')); load()
+    } catch (e) { setTestResult((e as Error).message) }
   }
   async function rescan() { await api('/api/scan', session, { method: 'POST' }); load() }
 
@@ -48,9 +58,17 @@ export default function Admin({ session }: { session: Session }) {
           <button disabled={!name || !email} data-testid="add-recipient">Register</button>
         </form>
         {message && <p className="muted" data-testid="admin-message">{message}</p>}
+        <div className="row"><button className="ghost" onClick={testEmail} disabled={!recipients.length} data-testid="test-email">Send a test critical alert</button></div>
+        {testResult && <p className="muted" data-testid="test-email-result">{testResult}</p>}
         <ul className="plain">{recipients.map((r) => (
           <li key={r.id} data-testid="recipient">{r.name} &lt;{r.email}&gt; <span className="chip">{r.min_severity}</span>
             <button className="small ghost" onClick={() => remove(r.id)}>Remove</button></li>))}</ul>
+      </section>
+      <section className="card wide accent" data-testid="config">
+        <div className="head"><h2>Configuration (from .env)</h2><span className="muted">read-only; change .env and restart</span></div>
+        {config && <div className="scroll"><table><tbody>{Object.entries(config).map(([k, v]) => (
+          <tr key={k}><td><strong>{k.replace(/_/g, ' ')}</strong></td><td className="param" style={{ fontFamily: 'ui-monospace, Consolas, monospace', fontSize: 13 }}>
+            {typeof v === 'object' ? JSON.stringify(v) : String(v)}</td></tr>))}</tbody></table></div>}
       </section>
       <section className="card wide">
         <h2>Fault injection</h2>

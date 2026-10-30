@@ -1,8 +1,9 @@
 import { useState } from 'react'
 import { api } from './api'
-import type { Session } from './types'
+import Brand from './Brand'
+import type { Branding, Session } from './types'
 
-export default function Login({ onSignedIn }: { onSignedIn: (s: Session) => void }) {
+export default function Login({ brand, onSignedIn }: { brand: Branding | null; onSignedIn: (s: Session) => void }) {
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
@@ -18,7 +19,8 @@ export default function Login({ onSignedIn }: { onSignedIn: (s: Session) => void
   return (
     <div className="login">
       <form onSubmit={submit} className="card">
-        <h1><span className="mark">WO</span> Work-order assistant</h1>
+        <Brand b={brand} />
+        <h1>Sign in</h1>
         <p className="muted">Turns an equipment alarm into a work order a planner can trust.</p>
         <label>User name<input value={username} onChange={(e) => setUsername(e.target.value)} autoComplete="username" data-testid="username" /></label>
         <label>Password<input type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" data-testid="password" /></label>

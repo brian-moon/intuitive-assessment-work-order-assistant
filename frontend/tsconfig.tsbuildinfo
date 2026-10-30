@@ -1,1 +1,1 @@
-{"root":["./src/Admin.tsx","./src/App.tsx","./src/Dashboard.tsx","./src/Governance.tsx","./src/Login.tsx","./src/RunPanel.tsx","./src/api.ts","./src/main.tsx","./src/types.ts"],"version":"5.6.3"}
+{"root":["./src/Admin.tsx","./src/App.tsx","./src/Brand.tsx","./src/Dashboard.tsx","./src/Governance.tsx","./src/History.tsx","./src/Login.tsx","./src/RunPanel.tsx","./src/api.ts","./src/main.tsx","./src/router.ts","./src/types.ts"],"version":"5.6.3"}
