@@ -104,3 +104,16 @@ def test_generated_work_order_quotes_the_source_values(client):
     number = client.get("/api/work-orders", headers=auth(client, "viewer")).json()[0]["work_order"]
     doc = client.get(f"/api/work-orders/{number}", headers=auth(client, "viewer")).json()["document_md"]
     assert "| vibration_rms | 8.4 mm/s | 2026-10-29 10:00 UTC |" in doc
+
+
+def test_schema_upgrades_a_database_created_by_an_older_version(settings):
+    """An older notifications table without claimed_at gets the column at startup instead of failing."""
+    db = Database(settings.database_url)
+    try:
+        db.init_schema()
+        db.exec("ALTER TABLE notifications DROP COLUMN claimed_at")
+        db.init_schema()
+        assert db.row("SELECT count(*) AS n FROM information_schema.columns WHERE table_name = 'notifications' "
+                      "AND column_name = 'claimed_at'")["n"] == 1
+    finally:
+        db.close()

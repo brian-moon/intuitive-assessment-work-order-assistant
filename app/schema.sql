@@ -137,3 +137,5 @@ ALTER TABLE runs ADD COLUMN IF NOT EXISTS attempts jsonb NOT NULL DEFAULT '[]';
 ALTER TABLE runs ADD COLUMN IF NOT EXISTS decided_by text;
 ALTER TABLE runs ADD COLUMN IF NOT EXISTS decision text;       -- approve | reject | correct
 ALTER TABLE runs ADD COLUMN IF NOT EXISTS wait_ms integer;     -- how long the draft waited for the planner
+-- Columns added after the first release: CREATE TABLE IF NOT EXISTS does not add them to an existing database.
+ALTER TABLE notifications ADD COLUMN IF NOT EXISTS claimed_at timestamptz NOT NULL DEFAULT now();
