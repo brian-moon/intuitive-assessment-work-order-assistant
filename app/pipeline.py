@@ -282,10 +282,12 @@ class Pipeline:
             self._run_ctx.pop(run_id, None)
             snap = self.graph.get_state(cfg)
             v = snap.values or {}
-            waiting = bool(snap.next) and snap.next[0] == "approval"
+            waiting = snap.next == ("approval",)
             status = "awaiting_approval" if waiting else v.get("status", "failed")
             if status == "deciding":
-                status = "awaiting_approval"
+                # The decision was recorded but the stream broke before the run finished: the run must not take a
+                # second decision. It can only be continued (POST /api/runs/{id}/continue/stream).
+                status = "interrupted"
             self.db.exec("UPDATE runs SET status = %s, priority = %s, reason = %s, usage = %s, updated_at = now() "
                          "WHERE run_id = %s", status, (v.get("draft") or {}).get("priority"), v.get("reason", ""),
                          Jsonb(v.get("usage", {})), run_id)
@@ -300,9 +302,12 @@ class Pipeline:
     def resume(self, run_id: str, decision: dict) -> Iterator[dict]:
         yield from self._drive(run_id, Command(resume=decision), "run.resume")   # the API has already claimed the run
 
+    def resume_interrupted(self, run_id: str) -> Iterator[dict]:
+        """Finish a run whose decision was already recorded (stream broke mid-way); takes no new decision."""
+        yield from self._drive(run_id, None, "run.continue")
+
     def state(self, run_id: str) -> dict | None:
         snap = self.graph.get_state({"configurable": {"thread_id": run_id}})
         if not snap.values:
             return None
-        waiting = bool(snap.next) and snap.next[0] == "approval"
-        return {**snap.values, "waiting": waiting}
+        return {**snap.values, "waiting": snap.next == ("approval",)}

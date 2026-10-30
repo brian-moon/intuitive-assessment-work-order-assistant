@@ -2,7 +2,7 @@
 misbehave in specific ways."""
 from __future__ import annotations
 
-from conftest import auth, decide, phases, run
+from conftest import auth, decide, events, phases, run
 
 from app.llm import LLMResponse, LLMUnavailable
 
@@ -162,3 +162,24 @@ def test_every_phase_is_traced(client):
     run_id, _ = run(client)
     spans = {s["name"] for s in client.get(f"/api/runs/{run_id}/trace", headers=auth(client, "viewer")).json()["spans"]}
     assert {f"phase.{p}" for p in ORDER if p != "approval"} <= spans and "gen_ai.chat" in spans
+
+
+def test_a_decision_interrupted_mid_stream_cannot_be_decided_again(client):
+    """The stream breaks after the decision was recorded: the run becomes 'interrupted', refuses a second decision,
+    and can only be continued to finish the decision already taken."""
+    planner = auth(client, "planner")
+    run_id, _ = run(client)
+    pipe = client.app.state.pipeline
+    client.app.state.db.exec("UPDATE runs SET status = 'deciding' WHERE run_id = %s", run_id)
+    gen = pipe.resume(run_id, {"decision": "approve", "by": "planner"})
+    for ev in gen:                                   # stop right after the approval is recorded
+        if ev["phase"] == "approval" and ev["status"] == "done":
+            break
+    gen.close()                                      # what a dropped client connection does
+    view = client.get(f"/api/runs/{run_id}", headers=planner).json()
+    assert view["status"] == "interrupted"
+    r = client.post(f"/api/runs/{run_id}/decision/stream", headers=planner, json={"decision": "reject"})
+    assert r.status_code == 409
+    evs = events(client.post(f"/api/runs/{run_id}/continue/stream", headers=planner))
+    assert evs[-1]["status"] == "created"
+    assert len(client.get("/api/work-orders", headers=planner).json()) == 1

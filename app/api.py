@@ -196,6 +196,8 @@ def create_app(settings: Settings | None = None, llm: LLM | None = None, send=No
         current = run_view(run_id)
         if current["status"] != "awaiting_approval":
             raise HTTPException(409, f"Run is {current['status']}; no decision is pending.")
+        if not (pipeline.state(run_id) or {}).get("waiting"):
+            raise HTTPException(409, "The run is not paused at the approval step.")
         if body.decision == "approve" and not current["can_approve"]:
             raise HTTPException(409, "The draft has blocking issues; reject it or start a new run.")
         # Claim the decision atomically: of two concurrent decisions on the same run, only one gets the row.
@@ -203,6 +205,15 @@ def create_app(settings: Settings | None = None, llm: LLM | None = None, send=No
                       "AND status = 'awaiting_approval' RETURNING run_id", run_id):
             raise HTTPException(409, "Another decision on this run is already in progress.")
         return sse(pipeline.resume(run_id, {**body.model_dump(exclude_none=True), "by": u["name"]}))
+
+    @app.post("/api/runs/{run_id}/continue/stream")
+    def continue_run(run_id: str, _: dict = Depends(need("planner"))):
+        if run_view(run_id)["status"] != "interrupted":
+            raise HTTPException(409, "Only an interrupted run can be continued.")
+        if not db.row("UPDATE runs SET status = 'running', updated_at = now() WHERE run_id = %s "
+                      "AND status = 'interrupted' RETURNING run_id", run_id):
+            raise HTTPException(409, "The run is already being continued.")
+        return sse(pipeline.resume_interrupted(run_id))
 
     @app.get("/api/runs/{run_id}/trace")
     def run_trace(run_id: str, _: dict = Depends(user)) -> dict:
