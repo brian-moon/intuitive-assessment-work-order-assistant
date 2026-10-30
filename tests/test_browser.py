@@ -157,3 +157,14 @@ def test_live_mode_history_and_scroll_position(server, page):
     page.go_back()
     page.evaluate("window.scrollTo(0, 0)")
     page.screenshot(path=str(REPORTS / "6-live.png"))
+
+
+def test_admin_registers_the_alert_recipient_from_the_dashboard(server, page):
+    sign_in(page, server, "admin", "admin-demo")
+    prompt = page.get_by_test_id("recipient-prompt")
+    expect(prompt).to_contain_text("Where should critical alerts go?")
+    page.get_by_test_id("prompt-email").fill("ops@plant.example")
+    page.get_by_test_id("prompt-register").click()
+    expect(prompt).to_have_count(0, timeout=10000)
+    page.get_by_test_id("tab-admin").click()
+    expect(page.get_by_test_id("recipient")).to_contain_text("ops@plant.example")

@@ -39,6 +39,39 @@ function SimulatorControls({ sim, session, onChange }: { sim: SimState; session:
     </div>)
 }
 
+/** Shown while nobody receives critical-alert e-mail: an admin registers an address on the spot. */
+function RecipientPrompt({ data, session, onDone }: { data: Data; session: Session; onDone: () => void }) {
+  const [name, setName] = useState('Plant admin')
+  const [email, setEmail] = useState('')
+  const [msg, setMsg] = useState('')
+  const [busy, setBusy] = useState(false)
+  const inbox = data.mail_inbox_url
+  if (session.role !== 'admin') return (
+    <section className="card prompt" data-testid="recipient-prompt">
+      <strong>No one receives critical-alert e-mail yet.</strong> <span className="muted">An admin can register an address here or on the Admin screen.</span>
+    </section>)
+  async function register(e: React.FormEvent) {
+    e.preventDefault(); setBusy(true); setMsg('')
+    try {
+      await api('/api/admin/recipients', session, { method: 'POST', body: JSON.stringify({ name, email, min_severity: 'critical' }) })
+      try { await api('/api/scan', session, { method: 'POST' }) } catch { /* a scan ran in the last 10 s: new alerts still arrive */ }
+      onDone()
+    } catch (err) { setMsg((err as Error).message) } finally { setBusy(false) }
+  }
+  return (
+    <section className="card prompt" data-testid="recipient-prompt">
+      <form onSubmit={register} className="row" style={{ marginTop: 0 }}>
+        <div style={{ flex: '1 1 260px' }}><strong>Where should critical alerts go?</strong>
+          <div className="muted">{inbox ? <>E-mail goes to the built-in test inbox (<a href={inbox} target="_blank" rel="noreferrer">{inbox}</a>) until a mail server is set in .env.</>
+            : 'Alerts are e-mailed through the configured mail server.'} The current critical alerts are sent right away.</div></div>
+        <label className="inline">Name<input value={name} onChange={(e) => setName(e.target.value)} data-testid="prompt-name" /></label>
+        <label className="inline" style={{ width: 240 }}>E-mail<input type="email" required value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@company.com" data-testid="prompt-email" /></label>
+        <button disabled={busy || !email || !name} data-testid="prompt-register">{busy ? 'Registering…' : 'Register'}</button>
+      </form>
+      {msg && <p className="error">{msg}</p>}
+    </section>)
+}
+
 export default function Dashboard({ data, session, live, onRefresh, onOpen, onHistory }: {
   data: Data | null; session: Session; live: Live; onRefresh: () => void; onOpen: (assetId: string, runId?: string) => void
   onHistory: (query?: string) => void
@@ -70,6 +103,8 @@ export default function Dashboard({ data, session, live, onRefresh, onOpen, onHi
         <span>last reading {ago(live.feed[0]?.ts ?? data.assets.reduce<string | null>((m, a) => (a.last_reading_at && (!m || a.last_reading_at > m) ? a.last_reading_at : m), null), serverNow)}</span>
         {sim && <SimulatorControls sim={sim} session={session} onChange={setSim} />}
       </div>
+
+      {data.alert_recipients === 0 && <RecipientPrompt data={data} session={session} onDone={onRefresh} />}
 
       <div className="kpis" style={{ marginBottom: 16 }}>
         <div className={count('critical') ? 'critical' : ''} data-testid="kpi-critical"><span className="kpi">{count('critical')}</span><span className="muted">assets critical</span></div>
@@ -114,7 +149,9 @@ export default function Dashboard({ data, session, live, onRefresh, onOpen, onHi
         </section>
 
         <section className="card">
-          <div className="head"><h2>Open alerts</h2><span className="muted">e-mail: {data.email}</span></div>
+          <div className="head"><h2>Open alerts</h2><span className="muted">e-mail: {data.mail_inbox_url
+            ? <a href={data.mail_inbox_url} target="_blank" rel="noreferrer" data-testid="inbox-link">test inbox</a> : data.email}
+            {' '}· {data.alert_recipients} recipient{data.alert_recipients === 1 ? '' : 's'}</span></div>
           {data.alerts.length === 0 ? <p className="muted">No open alerts.</p> : (
             <ul className="alerts">{data.alerts.map((a) => (
               <li key={a.id} data-testid="alert">

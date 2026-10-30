@@ -73,12 +73,17 @@ class Settings:
     # Signs sign-in tokens. Unset: generated once and kept in the database, so a restart does not sign everyone out.
     jwt_secret: str = field(default_factory=lambda: os.environ.get("APP_JWT_SECRET", ""))
     jwt_ttl_s: int = 8 * 3600
-    # Gmail (or any SMTP) for alert e-mail. Unset = the e-mail channel is recorded as "disabled", nothing is sent.
+    # Gmail (or any SMTP) for alert e-mail. docker compose defaults to the local test inbox (host "mailpit", no login).
+    # Unset = the e-mail channel is recorded as "disabled", nothing is sent. Empty port: 1025 for mailpit, else 587.
     smtp_host: str = field(default_factory=lambda: os.environ.get("SMTP_HOST", ""))
-    smtp_port: int = field(default_factory=lambda: int(os.environ.get("SMTP_PORT", "587")))
+    smtp_port: int = field(default_factory=lambda: int(os.environ.get("SMTP_PORT") or
+                                                       (1025 if os.environ.get("SMTP_HOST") == "mailpit" else 587)))
     smtp_user: str = field(default_factory=lambda: os.environ.get("SMTP_USER", ""))
     smtp_password: str = field(default_factory=lambda: os.environ.get("SMTP_PASSWORD", ""))
-    smtp_from: str = field(default_factory=lambda: os.environ.get("SMTP_FROM", os.environ.get("SMTP_USER", "")))
+    smtp_from: str = field(default_factory=lambda: os.environ.get("SMTP_FROM") or os.environ.get("SMTP_USER")
+                           or "alerts@workorder-assistant.local")
+    # Where mail sent to the local test inbox can be read (shown on the dashboard); empty when real mail is used.
+    mail_inbox_url: str = field(default_factory=lambda: os.environ.get("MAIL_INBOX_URL", ""))
     public_url: str = field(default_factory=lambda: os.environ.get("APP_PUBLIC_URL", "http://127.0.0.1:8790"))
     # Recipients registered at start-up, "Name <a@b.org>, c@d.org" (more can be added on the Admin screen).
     alert_emails: str = field(default_factory=lambda: os.environ.get("ALERT_EMAILS", ""))

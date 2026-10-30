@@ -19,6 +19,7 @@ export interface Dashboard {
   rejected_rows: { source: string; asset_id: string | null; reason: string }[]
   email: 'enabled' | 'disabled'
   now: string; live_clock: boolean; simulator: SimState
+  mail_inbox_url: string | null; alert_recipients: number
 }
 
 export type PhaseStatus = 'running' | 'done' | 'warning' | 'critical' | 'failed' | 'skipped' | 'waiting'

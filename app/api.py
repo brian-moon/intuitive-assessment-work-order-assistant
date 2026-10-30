@@ -100,6 +100,8 @@ def create_app(settings: Settings | None = None, llm: LLM | None = None, send=No
     sim = Simulator(db, notifier, lambda: settings.now, autostart=settings.sim_autostart, rate=settings.sim_rate,
                     unit=settings.sim_unit, start_thread=settings.live)
     app.state.simulator = sim
+    # the test inbox is only shown while mail really goes to it
+    inbox_url = (settings.mail_inbox_url or None) if settings.smtp_host == "mailpit" else None
 
     def close() -> None:   # release both connection pools (tests create many apps; a server process exits instead)
         sim.close()
@@ -177,6 +179,8 @@ def create_app(settings: Settings | None = None, llm: LLM | None = None, send=No
         return {"assets": assets, "alerts": alerts, "pending_approvals": pending, "work_orders": orders,
                 "rejected_rows": db.rows("SELECT source, asset_id, reason FROM data_rejections ORDER BY id"),
                 "email": "enabled" if notifier.send is not None else "disabled",
+                "mail_inbox_url": inbox_url,
+                "alert_recipients": db.row("SELECT count(*) AS n FROM alert_recipients")["n"],
                 "now": settings.now, "live_clock": settings.live, "simulator": sim.state()}
 
     # --- live telemetry and history -------------------------------------------------------------------------------
@@ -522,7 +526,8 @@ def create_app(settings: Settings | None = None, llm: LLM | None = None, send=No
                 "clock": "live" if settings.live else f"pinned at {settings.now}",
                 "smtp": {"host": settings.smtp_host or "not set", "user": settings.smtp_user or "not set",
                          "password": "set" if settings.smtp_password else "not set",
-                         "from": settings.smtp_from or settings.smtp_user or "not set"},
+                         "from": settings.smtp_from, "port": settings.smtp_port,
+                         "test_inbox": inbox_url or "none (real mail)"},
                 "public_url": settings.public_url, "email_cooldown_min": settings.email_cooldown_min,
                 "alert_emails_from_env": [e for _, e in parse_recipients(settings.alert_emails)],
                 "trustplane": settings.trustplane_url or "not set", "deployment": settings.deployment}

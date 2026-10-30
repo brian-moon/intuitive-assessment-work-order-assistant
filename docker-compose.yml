@@ -22,6 +22,8 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      mailpit:
+        condition: service_started
     environment:
       DATABASE_URL: postgresql://wo:wo-dev@db:5432/wo
       EVAL_DATABASE_URL: postgresql://wo:wo-dev@db:5432/wo_eval
@@ -38,8 +40,9 @@ services:
       LOCAL_LLM_TOKEN: ${LOCAL_LLM_TOKEN:-}
       ALERT_EMAILS: ${ALERT_EMAILS:-}
       ALERT_EMAIL_COOLDOWN_MIN: ${ALERT_EMAIL_COOLDOWN_MIN:-15}
-      SMTP_HOST: ${SMTP_HOST:-}
-      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_HOST: ${SMTP_HOST:-mailpit}        # empty: the local test inbox below (no login, nothing leaves the machine)
+      SMTP_PORT: ${SMTP_PORT:-}
+      MAIL_INBOX_URL: ${MAIL_INBOX_URL:-http://localhost:${MAIL_INBOX_PORT:-8025}}
       SMTP_USER: ${SMTP_USER:-}
       SMTP_PASSWORD: ${SMTP_PASSWORD:-}
       SMTP_FROM: ${SMTP_FROM:-}
@@ -53,6 +56,15 @@ services:
       - ./branding:/app/branding:ro
     ports:
       - "127.0.0.1:${APP_PORT:-8790}:8790"
+
+  mailpit:
+    # Local test inbox: alert e-mail is delivered here unless SMTP_HOST points at a real server.
+    # Read it at http://localhost:8025. Nothing is relayed outside this machine.
+    image: axllent/mailpit:v1.31.5
+    ports:
+      - "127.0.0.1:${MAIL_INBOX_PORT:-8025}:8025"
+    environment:
+      MP_MAX_MESSAGES: 500
 
 volumes:
   pgdata:

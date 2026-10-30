@@ -32,13 +32,16 @@ docker compose up -d
 
 - **Claude**: `ANTHROPIC_API_KEY=` your own key (none ships with this repository). Without it a deterministic demo
   model drafts, labelled "Demo model" in the header, so everything can still be clicked through offline.
-- **Who gets critical alerts**: `ALERT_EMAILS="Plant Admin <admin@example.com>"`, plus `SMTP_*` to actually send
-  (Gmail: `smtp.gmail.com` and an app password). More recipients can be added on the Admin screen, which also shows
-  the effective configuration and sends a test alert.
+- **Who gets critical alerts**: no file needed. Signed in as `admin`, the dashboard asks *Where should critical
+  alerts go?*; enter an address and the current critical alerts are e-mailed at once. (Or `ALERT_EMAILS=` in `.env`,
+  or the Admin screen, which also sends a test alert.)
+- **Reading the alert e-mail**: out of the box it is delivered to a built-in test inbox (Mailpit) at
+  **http://localhost:8025**: no account, nothing leaves your machine. For real delivery set `SMTP_*` in `.env` (e.g.
+  Gmail: `smtp.gmail.com`, port 587, your address and an app password).
 - **Port**: `APP_PORT=8790`.
 
-Start again from the seed data with `docker compose down -v`. Both ports (app, PostgreSQL 5440) are bound to
-localhost.
+Start again from the seed data with `docker compose down -v`. All ports (app 8790, test inbox 8025, PostgreSQL 5440)
+are bound to localhost.
 
 ### A five-minute tour
 
@@ -159,10 +162,11 @@ behaviour is measured separately by the evaluation (below), where variance is ex
 | `tests/test_api.py` | sign-in, roles, validation, not-found, conflicts, rate limit, recipients, governance overview |
 | `tests/test_data.py` | every source row loaded or rejected with a reason; the dashboard and the work order match the raw files, recomputed independently; schema upgrade of an older database |
 | `tests/test_routing_golden.py` | 24 cases (`evals/routing_golden.jsonl`) over every flaw, ladder shape and final route, with deterministic flawed stand-in models |
+| `tests/test_mail.py` | mail client against a fake server: no sign-in or TLS for the test inbox, TLS and sign-in for a real server, high importance on critical mail; the recipient prompt's data never reveals addresses |
 | `tests/test_live.py` | simulator values land in the requested threshold band; events are stored, scanned and alerted; e-mail cooldown; simulated readings never e-mail; live stream, its connection cap, history windows, live clock |
-| `tests/test_browser.py` | in Chromium: sign in, blinking alert banner, streamed run, every reconciliation rule passed, approval, work order, governance, browser back/forward; live feed and simulator switch, history charts, scroll position restored |
+| `tests/test_browser.py` | in Chromium: sign in, blinking alert banner, streamed run, every reconciliation rule passed, approval, work order, governance, browser back/forward; live feed and simulator switch, history charts, scroll position restored; an admin registers the alert recipient from the dashboard prompt |
 
-Tests use the scripted model: deterministic, no key, no tokens, no mail. 134 tests plus 2 browser tests pass.
+Tests use the scripted model: deterministic, no key, no tokens, no mail. 139 tests plus 3 browser tests pass.
 
 ### AI evaluation
 
@@ -227,7 +231,8 @@ fail-open and lost events are counted on the Governance screen.
 
 A critical finding reaches people by two routes: a dashboard alert (blinking banner, toast, flashing tab title,
 optional sound) until someone acknowledges it, and an HTML e-mail with high-importance headers to every registered
-recipient. Each recipient gets one e-mail per asset, metric and severity per 15 minutes
+recipient, through the configured mail server or, when none is set, the built-in test inbox. Each recipient gets one
+e-mail per asset, metric and severity per 15 minutes
 (`ALERT_EMAIL_COOLDOWN_MIN`), because live telemetry repeats; the dashboard still records every alert. Readings
 from the simulator alert on the dashboard only, never by e-mail, so a demo generator cannot fill real inboxes.
 Every delivery attempt is recorded with its status, and a failed e-mail is retried by the next scan.

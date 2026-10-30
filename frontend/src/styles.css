@@ -222,3 +222,4 @@ th, td { text-align: left; padding: 7px 6px; border-bottom: 1px solid var(--line
 .login .brand .names span { color: var(--muted); }
 .login h1 { font-size: 20px; }
 .grid.run { align-items: start; }
+.card.prompt { border-left: 4px solid var(--warning); margin-bottom: 16px; background: #fffaf0; }

@@ -29,20 +29,26 @@ ORDER = {"warning": 1, "critical": 2}
 
 
 def smtp_sender(settings) -> Callable[..., None] | None:
-    if not (settings.smtp_host and settings.smtp_user and settings.smtp_password):
+    """SMTP delivery, or None (e-mail recorded as disabled) without a host. Signs in only when a user and password are
+    set (the local test inbox needs neither) and uses STARTTLS whenever the server offers it."""
+    if not settings.smtp_host:
         return None
 
     def send(to: str, subject: str, body: str, html: str | None = None, severity: str = "warning") -> None:
         msg = EmailMessage()
-        msg["From"], msg["To"], msg["Subject"] = settings.smtp_from or settings.smtp_user, to, subject
+        msg["From"], msg["To"], msg["Subject"] = settings.smtp_from, to, subject
         if severity == "critical":
             msg["Importance"], msg["X-Priority"], msg["X-MSMail-Priority"] = "High", "1 (Highest)", "High"
         msg.set_content(body)
         if html:
             msg.add_alternative(html, subtype="html")
         with smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=15) as s:
-            s.starttls(context=ssl.create_default_context())
-            s.login(settings.smtp_user, settings.smtp_password)
+            s.ehlo()
+            if s.has_extn("starttls"):
+                s.starttls(context=ssl.create_default_context())
+                s.ehlo()
+            if settings.smtp_user and settings.smtp_password:
+                s.login(settings.smtp_user, settings.smtp_password)
             s.send_message(msg)
     return send
 
