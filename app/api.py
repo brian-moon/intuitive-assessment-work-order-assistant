@@ -208,8 +208,9 @@ def create_app(settings: Settings | None = None, llm: LLM | None = None, send=No
                 "unit": r["unit"], "ts": r["ts"], "source": r["source"],
                 "severity": severity_of(r["asset_id"], r["metric"], r["value"]), "backlog": backlog}
 
-    # Each open stream holds a worker thread, so they are capped. A slot carries its expiry, so one whose release
-    # never ran (client gone before the first byte) frees itself; release is idempotent.
+    # Each open stream holds a worker thread, so they are capped. A slot carries an expiry that the running stream
+    # renews every second; one whose stream never started (client gone first) frees itself after 60 s. Release is
+    # idempotent.
     stream_slots: dict[str, tuple[str, float]] = {}
     stream_lock = threading.Lock()
 
@@ -227,6 +228,9 @@ def create_app(settings: Settings | None = None, llm: LLM | None = None, send=No
             last_n = db.row("SELECT coalesce(max(id), 0) AS m FROM notifications")["m"]
             started, beat = time.time(), 0.0
             while time.time() - started < seconds:
+                with stream_lock:                    # a running stream keeps its slot alive
+                    if slot in stream_slots:
+                        stream_slots[slot] = (u["name"], time.time() + 60)
                 for r in db.rows("SELECT id, asset_id, metric, value, unit, ts, source FROM telemetry WHERE id > %s "
                                  "ORDER BY id LIMIT 200", last_t):
                     last_t = r["id"]
@@ -248,7 +252,7 @@ def create_app(settings: Settings | None = None, llm: LLM | None = None, send=No
             mine = sum(1 for who, _ in stream_slots.values() if who == u["name"])
             if len(stream_slots) >= 20 or mine >= 3:
                 raise HTTPException(429, "Too many live streams open; close another tab.")
-            stream_slots[slot] = (u["name"], now_ + seconds + 30)
+            stream_slots[slot] = (u["name"], now_ + 60)     # renewed every second once the stream runs
 
         def counted():
             try:
