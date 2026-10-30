@@ -8,7 +8,7 @@ from __future__ import annotations
 import os
 import secrets
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -16,7 +16,7 @@ ROOT = Path(__file__).resolve().parent.parent
 
 def _now() -> datetime:
     raw = os.environ.get("APP_NOW", "2026-10-29T12:00:00Z")
-    return datetime.fromisoformat(raw.replace("Z", "+00:00")).astimezone(timezone.utc)
+    return datetime.fromisoformat(raw.replace("Z", "+00:00")).astimezone(UTC)
 
 
 def _users() -> dict[str, tuple[str, str]]:

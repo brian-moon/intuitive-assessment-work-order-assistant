@@ -17,12 +17,13 @@ from __future__ import annotations
 import logging
 import time
 from collections.abc import Iterator
+from itertools import pairwise
 from typing import Any, TypedDict
 
 from langgraph.config import get_stream_writer
-from opentelemetry import trace
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command, interrupt
+from opentelemetry import trace
 from psycopg.types.json import Jsonb
 
 from . import anomaly, workorder
@@ -256,7 +257,7 @@ class Pipeline:
             g.add_node(name, getattr(self, name))
         g.add_edge(START, "guard")
         g.add_conditional_edges("guard", lambda s: END if s.get("status") == "refused" else "load_asset")
-        for a, b in zip(order[1:5], order[2:6]):
+        for a, b in pairwise(order[1:6]):
             g.add_edge(a, b)
         g.add_conditional_edges("agent_draft", lambda s: "reconcile" if s.get("draft") and not s.get("status") else END)
         g.add_edge("reconcile", "approval")
@@ -273,8 +274,7 @@ class Pipeline:
         self.db.exec("UPDATE runs SET trace_id = coalesce(trace_id, %s) WHERE run_id = %s", trace_id_hex(span), run_id)
         status, v = "failed", {}
         try:
-            for ev in self.graph.stream(payload, cfg, stream_mode="custom"):
-                yield ev
+            yield from self.graph.stream(payload, cfg, stream_mode="custom")
         finally:
             # Always record where the run really is, also when the stream breaks (client gone, error): a run that was
             # claimed for a decision returns to awaiting_approval instead of staying stuck in "deciding".

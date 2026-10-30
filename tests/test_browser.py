@@ -16,10 +16,10 @@ import time
 
 import httpx
 import pytest
+from conftest import TEST_URL
 from playwright.sync_api import expect
 
 from app.config import ROOT
-from conftest import TEST_URL
 
 pytestmark = pytest.mark.browser
 REPORTS = ROOT / "reports"

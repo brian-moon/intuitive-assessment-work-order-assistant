@@ -47,7 +47,7 @@ class InventingLLM:
 
 
 def test_phases_stream_in_order_and_the_run_waits(client):
-    run_id, evs = run(client)
+    _, evs = run(client)
     seen = list(dict.fromkeys(p for p, _ in phases(evs) if p != "run"))
     assert seen == ORDER
     assert evs[-1] == {**evs[-1], "phase": "run", "status": "awaiting_approval"}
@@ -114,14 +114,14 @@ def test_cmms_timeout_keeps_the_work_order_and_a_retry_exports_it(client):
 
 def test_historian_down_fails_visibly_without_a_guessed_draft(client):
     client.app.state.faults.telemetry_unavailable = True
-    run_id, evs = run(client)
+    _, evs = run(client)
     assert evs[-1]["status"] == "failed" and ("reconcile", "done") not in phases(evs)
     assert any(e["phase"] == "agent_draft" and e.get("data", {}).get("is_error") for e in evs)
 
 
 def test_invalid_stores_response_drafts_without_parts(client):
     client.app.state.faults.parts_invalid_response = True
-    run_id, evs = run(client)
+    _, evs = run(client)
     draft = next(e for e in evs if e["phase"] == "approval")["data"]["draft"]
     assert draft["parts"] == [] and any("Stock levels are unknown" in a for a in draft["recommended_actions"])
 

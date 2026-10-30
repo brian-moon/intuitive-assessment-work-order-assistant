@@ -32,7 +32,8 @@ def _test_database():
 
 @pytest.fixture
 def settings() -> Settings:
-    return Settings(database_url=TEST_URL, data_dir=ROOT / "data", llm="scripted", users=USERS, jwt_secret="test-secret-for-the-suite-only-0123456789")
+    return Settings(database_url=TEST_URL, data_dir=ROOT / "data", llm="scripted", users=USERS,
+                    jwt_secret="test-secret-for-the-suite-only-0123456789")
 
 
 class Mailbox(list):

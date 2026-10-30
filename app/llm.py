@@ -114,7 +114,7 @@ class ScriptedLLM:
     """Deterministic stand-in: call each read tool once, then propose by the same rules the system prompt states."""
 
     model = "scripted"
-    ORDER = ["get_asset", "get_telemetry", "get_maintenance_history", "check_spare_parts"]
+    ORDER = ("get_asset", "get_telemetry", "get_maintenance_history", "check_spare_parts")
 
     def create(self, messages: list[dict]) -> LLMResponse:
         results = self._results(messages)

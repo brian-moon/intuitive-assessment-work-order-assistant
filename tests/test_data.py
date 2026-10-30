@@ -11,7 +11,8 @@ from conftest import auth, run
 from app.config import ROOT
 from app.db import Database
 
-RAW = list(csv.DictReader(open(ROOT / "data" / "telemetry.csv", encoding="utf-8", newline="")))
+with open(ROOT / "data" / "telemetry.csv", encoding="utf-8", newline="") as _f:
+    RAW = list(csv.DictReader(_f))
 CATS = json.loads((ROOT / "data" / "categories.json").read_text(encoding="utf-8"))
 ASSETS = {a["asset_id"]: a for a in json.loads((ROOT / "data" / "assets.json").read_text(encoding="utf-8"))}
 NOW = datetime.fromisoformat("2026-10-29T12:00:00+00:00")

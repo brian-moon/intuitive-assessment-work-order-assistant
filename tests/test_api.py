@@ -68,7 +68,8 @@ def test_recipient_registry(client):
     admin = auth(client, "admin")
     r = client.post("/api/admin/recipients", headers=admin, json={"name": "Ops Lead", "email": " Ops@Plant.example "})
     assert r.status_code == 201 and r.json()["email"] == "ops@plant.example"
-    assert client.post("/api/admin/recipients", headers=admin, json={"name": "Dup", "email": "ops@plant.example"}).status_code == 409
+    dup = {"name": "Dup", "email": "ops@plant.example"}
+    assert client.post("/api/admin/recipients", headers=admin, json=dup).status_code == 409
     for bad in ({"name": "X", "email": "not-an-email"}, {"name": "", "email": "a@b.org"},
                 {"name": "X", "email": "a@b.org", "min_severity": "info"}):
         assert client.post("/api/admin/recipients", headers=admin, json=bad).status_code == 422

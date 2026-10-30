@@ -16,3 +16,11 @@ addopts = "-m 'not live and not browser'"
 [tool.pyright]
 venvPath = "."
 venv = ".venv"
+
+[tool.ruff]
+line-length = 130
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM", "RUF"]
+ignore = ["B008", "E702", "RUF001"]   # B008: FastAPI Depends() idiom; RUF001: "×" in quantities is intended

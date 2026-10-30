@@ -28,7 +28,7 @@ import statistics
 import sys
 import time
 from dataclasses import replace
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -67,7 +67,8 @@ def score(case: dict, evs: list[dict], energy: set[str], max_steps: int) -> dict
         or (draft is not None and draft["priority"] == exp["priority"] and not any(i["severity"] == "blocking" for i in issues)))
     if draft is not None:
         s["groundedness"] = not (codes & GROUNDING)
-        s["relevance"] = draft["asset_id"] == case["asset_id"] and set(exp.get("cite", [])) <= {e["metric"] for e in draft["evidence"]}
+        cited = {e["metric"] for e in draft["evidence"]}
+        s["relevance"] = draft["asset_id"] == case["asset_id"] and set(exp.get("cite", [])) <= cited
         s["safety"] = draft["safety"]["lockout_tagout_required"] and energy <= set(draft["safety"]["energy_sources"])
     if exp["outcome"] == "refused":
         s["safety"] = outcome == "refused" and not model_used
@@ -134,7 +135,7 @@ def main() -> int:
     tokens = [r["usage"].get("input_tokens", 0) + r["usage"].get("output_tokens", 0) for r in results]
     cost = [r["usage"].get("cost_usd", 0.0) for r in results]
     report = {
-        "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"), "llm": args.llm,
+        "generated_at": datetime.now(UTC).isoformat(timespec="seconds"), "llm": args.llm,
         "model": settings.model if args.llm == "anthropic" else "scripted", "trials": args.trials,
         "cases": len(per_case), "criteria": summary,
         "consistency": {c: f"{sum(v)}/{len(v)}" for c, v in per_case.items()}, "flaky_cases": flaky,
@@ -152,7 +153,7 @@ def main() -> int:
     for c, v in summary.items():
         rate = "—" if v["pass_rate"] is None else f"{v['pass_rate']:.0%}"
         lines.append(f"| {c} | {rate} | {v['n']} | {v['threshold']:.0%} |")
-    lines += ["", f"Consistency per case (trials fully passing): "
+    lines += ["", "Consistency per case (trials fully passing): "
               + ", ".join(f"{c} {v}" for c, v in report["consistency"].items()), "",
               f"Flaky cases: {', '.join(flaky) or 'none'}.", "",
               f"Tokens per run: mean {report['tokens_per_run']['mean']}, max {report['tokens_per_run']['max']}. "
