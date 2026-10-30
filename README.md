@@ -10,8 +10,8 @@ it before anything is written to the CMMS.
 Needs Docker (with Compose) only.
 
 ```bash
-git clone https://github.com/brian-moon/intuitive-assessment.git
-cd intuitive-assessment
+git clone https://github.com/brian-moon/intuitive-assessment-work-order-assistant.git
+cd intuitive-assessment-work-order-assistant
 docker compose up --build            # first build takes about 2 minutes
 ```
 
@@ -44,9 +44,10 @@ localhost.
 
 1. Sign in as `planner`. The red banner blinks while critical alerts are open (the tab title flashes too; the bell
    in the header adds a sound).
-2. **Dashboard, Live**: asset cards by status, a live readings feed, and the **telemetry simulator**: switch it on and
-   it runs from start-up at 6 events per minute (switch it off, or change the rate per minute or per hour); each event is a random machine and metric with a random normal / warning /
-   critical status. Critical readings raise the banner, a toast and the alert e-mails as they arrive.
+2. **Dashboard, Live**: asset cards by status, a live readings feed, and the **telemetry simulator**, which runs
+   from start-up at 6 events per minute (switch it off, or set the rate per minute or per hour). Each event is a
+   random machine and metric with a random normal / warning / critical status. A critical reading raises the banner
+   and a toast as it arrives; simulated readings never send e-mail (see Alerting below).
    **History** shows any past window (1 h to 30 days, or custom): a summary per asset, or charts per metric with the
    warning and critical lines, and the alerts, runs and work orders of that window.
 3. P-101 → **Run** → **Run pipeline**. Each phase streams in as it runs. Only the phase marked **LLM** (the agent's
@@ -144,7 +145,12 @@ Claude Haiku 5.5 is the smallest current Claude model, and drafting from tool re
 The stable prefix (tools and system prompt) is cached, effort is low, output is capped, and every call's tokens and
 cost are recorded per tier.
 
-## Testing
+## Test strategy
+
+Risk-based: the expensive failures here are an ungrounded or unsafe work order reaching the CMMS, an alarm nobody
+sees, and a run stuck or approved twice. So the deterministic checks that prevent those carry the most tests, the
+model is exercised through stand-ins that fail in specific ways (no tokens, no flakiness), and the real model's
+behaviour is measured separately by the evaluation (below), where variance is expected and reported.
 
 | Suite | What it proves |
 |---|---|
@@ -153,9 +159,10 @@ cost are recorded per tier.
 | `tests/test_api.py` | sign-in, roles, validation, not-found, conflicts, rate limit, recipients, governance overview |
 | `tests/test_data.py` | every source row loaded or rejected with a reason; the dashboard and the work order match the raw files, recomputed independently; schema upgrade of an older database |
 | `tests/test_routing_golden.py` | 24 cases (`evals/routing_golden.jsonl`) over every flaw, ladder shape and final route, with deterministic flawed stand-in models |
-| `tests/test_browser.py` | the critical workflow in Chromium: sign in, alert banner, streamed run, approval, work order, governance |
+| `tests/test_live.py` | simulator values land in the requested threshold band; events are stored, scanned and alerted; e-mail cooldown; simulated readings never e-mail; live stream, its connection cap, history windows, live clock |
+| `tests/test_browser.py` | in Chromium: sign in, blinking alert banner, streamed run, every reconciliation rule passed, approval, work order, governance, browser back/forward; live feed and simulator switch, history charts, scroll position restored |
 
-Tests use the scripted model: deterministic, no key, no tokens, no mail.
+Tests use the scripted model: deterministic, no key, no tokens, no mail. 134 tests plus 2 browser tests pass.
 
 ### AI evaluation
 
@@ -164,7 +171,34 @@ instruction-override requests, a historian outage, an invalid stores response, a
 asset's maintenance history, and a request that names a different asset. Each run is scored on task completion,
 groundedness, relevance, tool accuracy, safety and failure handling. Model output varies, so each case runs `--trials`
 times; the report gives pass rates, per-case consistency, flaky cases, tokens, cost, latency and the routes taken.
-`evals/thresholds.json` is the gate: below it the run exits non-zero.
+`evals/thresholds.json` is the gate: below it the run exits non-zero. The evaluation runs with a pinned clock and no
+simulator, so differences between trials come from the model alone.
+
+**Results on Claude Haiku 5.5** (3 trials × 13 cases each run):
+
+| Criterion | First run | After fixes | Threshold |
+|---|---|---|---|
+| task completion | 92% | 100% | 85% |
+| groundedness | 90% | 100% | 100% |
+| relevance | 90% | 100% | 90% |
+| tool accuracy | 82% | 100% | 90% |
+| safety | 100% | 100% | 100% |
+| failure handling | 97% | 100% | 90% |
+| flaky cases | E01-critical-pump, E02-critical-compressor | none | |
+| cost per run | $0.00079 | $0.00070 | |
+| latency per run | 8.13 s | 6.21 s | |
+
+Reports: `reports/eval-frontier-baseline.*` (first run) and `reports/eval-frontier.*` (after fixes).
+
+The first run (`reports/eval-frontier-baseline.*`) fell below the groundedness and tool-accuracy gates, and the
+reasons were real: the 1,500-token output cap cut tool input off mid-call; the draft schema did not state the
+600-character summary limit or the exact timestamp format; the model obeyed a request that named a different asset
+(reconciliation blocked it, so it reached a planner, not the CMMS); and once, with the stores service down, it listed
+parts anyway. Fixes: output cap 4,096, schema descriptions, two prompt rules, and `wrong_asset` scored as relevance
+rather than groundedness. A run in between still showed one schema gap (an empty evidence list for a routine check,
+which the model corrected on its next step); the schema now states it. 100% on 39 runs is not a guarantee: the set is
+small, and the nightly run exists to catch drift. This is what the gate is for: a prompt or model change is judged on the same cases before
+it ships.
 
 ## CI
 
@@ -174,7 +208,12 @@ times; the report gives pass rates, per-case consistency, flaky cases, tokens, c
 |---|---|
 | pull request | lint, all tests on PostgreSQL, scripted evaluation |
 | push to `main` | the above, the front-end build and the browser test (the pre-deploy gate) |
-| nightly | live evaluation on Claude Haiku 5.5, 3 trials per case (repository secret `ANTHROPIC_API_KEY`) |
+| nightly | live evaluation on Claude Haiku 5.5, 3 trials per case (repository secret `ANTHROPIC_API_KEY`; skipped with a notice when it is not set) |
+
+Why this split: pull requests need fast, deterministic signal and must not spend tokens or flake on model variance,
+so they get lint, every test and the scripted evaluation. The browser test is slower and depends on the built front
+end, so it gates what is deployed from `main`. Model behaviour drifts (new model versions, prompt edits), so the
+live evaluation runs on a schedule and on demand, and a drop below the thresholds fails the run.
 
 ## Observability
 
@@ -184,10 +223,21 @@ any OTLP collector. Optionally (`TRUSTPLANE_URL`, `TRUSTPLANE_TOKEN`) spans and 
 triggers, routing decisions, planner decisions, evaluation results) go to a TrustPlane governance ledger; sending is
 fail-open and lost events are counted on the Governance screen.
 
+## Alerting
+
+A critical finding reaches people by two routes: a dashboard alert (blinking banner, toast, flashing tab title,
+optional sound) until someone acknowledges it, and an HTML e-mail with high-importance headers to every registered
+recipient. Each recipient gets one e-mail per asset, metric and severity per 15 minutes
+(`ALERT_EMAIL_COOLDOWN_MIN`), because live telemetry repeats; the dashboard still records every alert. Readings
+from the simulator alert on the dashboard only, never by e-mail, so a demo generator cannot fill real inboxes.
+Every delivery attempt is recorded with its status, and a failed e-mail is retried by the next scan.
+
 ## Security notes
 
-- No secrets in the repository; demo users only with `APP_DEMO_USERS=1` (the compose default for local review).
-  Otherwise `APP_USERS` and `APP_JWT_SECRET` are required.
+- No secrets in the repository; demo users only with `APP_DEMO_USERS=1` (the compose default for local review),
+  otherwise `APP_USERS` is required. The token-signing key comes from `APP_JWT_SECRET`, or is generated once and kept
+  in the database, so a restart does not sign everyone out.
+- Viewers never see recipients' e-mail addresses; live streams are capped per user and in total.
 - Tool inputs and the draft are schema-validated; tool results and the request are treated as data, not
   instructions, and the guard runs before any model call.
 - Decisions and alert deliveries are claimed atomically: no double approval, one work order per run, one e-mail per
@@ -205,4 +255,84 @@ thresholds in `data/categories.json`.
 
 **Live data.** The clock is real; the seed data is shifted at first start so its newest reading is just before
 start-up (the demo opens with the same alarms, then the data ages and the simulator adds new readings). Tests and the
-evaluation pin the clock (`APP_NOW`) so their answers never change.
+evaluation pin the clock to the seed data's "now", so their answers never change (`APP_NOW` does the same for a
+running instance).
+
+## Scope
+
+The brief asks for one deliberately small workflow. The core is that workflow: an alarm on one asset becomes an
+agent draft, checked against the source data, approved by a planner and exported, with its tests, evaluation and CI.
+Around it, a few additions go beyond the minimum, each separable from the core: the live dashboard with the telemetry
+simulator and history, the model ladder (local model, then Claude, then a planner), the governance screen, and
+branding. They are there because they show how the same workflow behaves under live data and how its controls would
+be operated, not because the workflow needs them.
+
+## Design decisions
+
+- **One model call site.** Only `agent_draft` uses a model; thresholds, data quality, reconciliation, routing and
+  every write are code. What can be decided exactly is never left to a model.
+- **The critic is a verifier, not a second model.** Each reconciliation rule has an exact answer from the source
+  records, so it is cheaper, faster and more reliable than an LLM judge, and its output (a confidence) drives routing.
+- **Confidence is computed, not self-reported.** Self-reported model confidence is not reliable enough to route on.
+- **Human approval is structural.** The graph pauses in a PostgreSQL checkpoint; there is no code path from a draft
+  to a work order without a planner's decision, and a draft with a blocking issue cannot be approved.
+- **Tools are read-only.** The agent cannot write; the single write (the work order) happens after approval.
+- **Smallest capable model, with a ladder.** Claude Haiku 5.5 by default; a local model can sit in front of it, with
+  thresholds deciding when to escalate, so cost scales with difficulty.
+- **Mocks where the brief allows.** The CMMS, the historian outage and the stores service are mocked behind fault
+  switches; the data is a representative fixture set loaded through the same validation a real feed would pass.
+- **PostgreSQL from the start.** Checkpoints, run history, alert claims and data share one transactional store, so
+  "approve once" and "alert once" are database guarantees, not hopes.
+
+## Assumptions
+
+- Telemetry arrives as (asset, metric, value, unit, timestamp) readings; thresholds are per machine category.
+- Priority follows a fixed rule from the worst severity and the asset's criticality (shown on the rule card).
+- Lockout/tagout must cover every energy source recorded for the asset; the asset register is correct.
+- A planner approves every work order; the assistant drafts, it never dispatches.
+- The CMMS accepts one work order per approved run; its timeout is transient and retried by the planner.
+- Demo sign-in (three fixed users) stands in for the plant's identity provider.
+
+## Limitations
+
+- The CMMS, historian and stores service are mocks; there is no real integration.
+- Sign-in is a local user list with JWTs, not SSO; there is no per-site authorization.
+- Reconciliation checks what can be checked against records (grounding, parts, isolation, data age, priority); it
+  cannot judge whether the recommended actions are the best repair.
+- The evaluation set is small (13 cases) and hand-written; pass rates on it are indicative, not statistically strong.
+- The simulator produces independent random readings, not physically plausible degradation curves.
+- One process: the simulator and live streams run in the API process; scaling out would move them to workers.
+
+## With more time
+
+- **Product:** real CMMS and historian connectors; SSO and per-site roles; editable drafts (not only priority);
+  maintenance-history retrieval over free text; scheduled scans and escalation of unacknowledged alerts; mobile view
+  for technicians.
+- **Quality:** a larger evaluation set built from real (anonymised) alarms and planner decisions, with planner
+  corrections fed back as cases; an LLM-assisted review of recommended actions, measured against planner edits;
+  contract tests against the CMMS API; load tests of the live stream; mutation testing of the reconciliation rules;
+  accessibility checks in the browser suite.
+- **Operations:** OTLP export to a collector by default (`future/otel-collector.yaml`), alerting on evaluation
+  regressions, and the live evaluation in CI with a repository secret.
+
+## Deliverables
+
+| Asked for | Where |
+|---|---|
+| Working AI application, backend API, simple user experience | `app/`, `frontend/`; `docker compose up --build` |
+| Agent with tool use, state across steps, error handling, human approval | `app/pipeline.py`, `app/tools.py`, LangGraph checkpoints, the approval phase |
+| Separation of logic, orchestration, tools, data access, state, UX | module table under How it works |
+| Unit, integration, API, data-validation and browser tests | `tests/` (see Test strategy) |
+| AI evaluation dataset, scoring, executable evaluation | `evals/cases.jsonl`, `evals/run_eval.py`, `evals/thresholds.json` |
+| Injected failures | Admin fault switches; stale and rejected data in the seed; unsafe requests; flawed stand-in models |
+| Diagnostics | per-run execution history, OpenTelemetry traces, logs, screenshots and reports in `reports/` |
+| Test and evaluation reports | `reports/` (evaluation reports, browser screenshots) |
+| CI configuration and explanation | `.github/workflows/ci.yml`, CI section above |
+| Commit history | `git log` |
+| More time | section above |
+
+## AI usage
+
+Built with an AI coding assistant (Claude Code) as the brief requires, under my direction: I set the scenario, the
+architecture, the model choice and the ladder thresholds, reviewed the code and tests, and directed every change,
+including the fixes from the first live evaluation. The runtime agent uses Claude Haiku 5.5.
