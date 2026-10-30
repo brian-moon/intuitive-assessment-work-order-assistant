@@ -129,3 +129,11 @@ CREATE TABLE IF NOT EXISTS work_orders (
     cmms_status  text NOT NULL,           -- exported | pending_retry
     created_at   timestamptz NOT NULL DEFAULT now()
 );
+
+-- Model ladder (routing.py): the final route and every attempt, for the governance overview.
+ALTER TABLE runs ADD COLUMN IF NOT EXISTS route text;          -- local | frontier | demo | model | human
+ALTER TABLE runs ADD COLUMN IF NOT EXISTS confidence real;
+ALTER TABLE runs ADD COLUMN IF NOT EXISTS attempts jsonb NOT NULL DEFAULT '[]';
+ALTER TABLE runs ADD COLUMN IF NOT EXISTS decided_by text;
+ALTER TABLE runs ADD COLUMN IF NOT EXISTS decision text;       -- approve | reject | correct
+ALTER TABLE runs ADD COLUMN IF NOT EXISTS wait_ms integer;     -- how long the draft waited for the planner

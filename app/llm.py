@@ -1,5 +1,9 @@
 """Model access behind one small interface, so the agent does not know which model it talks to.
 
+Tiers (see ``routing.py``): ``local`` = a model on premises (Qwen through the MoonPlane model gateway, which speaks the
+Anthropic Messages API, so the same client class is used), ``frontier`` = Claude Haiku 5.5, ``demo`` = the scripted
+stand-in when neither is configured. ``make_tiers`` builds the ladder from the environment.
+
 * ``AnthropicLLM`` calls Claude Haiku 5.5 (the smallest current Claude: drafting a work order from tool results does
   not need a larger model). Token economy: the tool definitions and system prompt are a stable prefix with prompt
   caching on, effort is set to ``low``, output is capped, and every call's usage and estimated cost is recorded.
@@ -79,15 +83,23 @@ class LLM(Protocol):
 
 
 class AnthropicLLM:
-    def __init__(self, model: str, max_tokens: int):
+    """Claude through the Anthropic API, or (``base_url`` set) any server that speaks the Messages API, such as the
+    model gateway in front of Ollama. Caching and effort are Claude features and are only sent to Claude."""
+
+    def __init__(self, model: str, max_tokens: int, base_url: str | None = None, api_key: str | None = None,
+                 provider: str = "anthropic", timeout: float = 60.0):
         import anthropic  # imported lazily so the scripted path needs no API key
 
         self._anthropic = anthropic
-        self.client = anthropic.Anthropic(max_retries=2, timeout=60.0)
-        self.model, self.max_tokens = model, max_tokens
+        kw = {"base_url": base_url, "api_key": api_key} if base_url else {}
+        self.client = anthropic.Anthropic(max_retries=1 if base_url else 2, timeout=timeout, **kw)
+        self.model, self.max_tokens, self.provider = model, max_tokens, provider
 
     def create(self, messages: list[dict]) -> LLMResponse:
         a = self._anthropic
+        claude = self.provider == "anthropic"
+        extra = {"cache_control": {"type": "ephemeral"},   # caches the stable prefix: tools -> system -> earlier turns
+                 "output_config": {"effort": "low"}} if claude else {}
         try:
             r = self.client.messages.create(
                 model=self.model,
@@ -95,8 +107,7 @@ class AnthropicLLM:
                 system=[{"type": "text", "text": SYSTEM_PROMPT}],
                 tools=TOOL_SPECS,
                 messages=messages,
-                cache_control={"type": "ephemeral"},   # caches the stable prefix: tools -> system -> earlier turns
-                output_config={"effort": "low"},
+                **extra,
             )
         except a.RateLimitError as e:
             raise LLMUnavailable("Model rate-limited; try again shortly.") from e
@@ -106,17 +117,37 @@ class AnthropicLLM:
             raise LLMUnavailable(f"Model service error ({e.status_code}).") from e
         except a.APIConnectionError as e:
             raise LLMUnavailable("Model service unreachable.") from e
+        except a.APIError as e:   # e.g. a malformed answer from a non-Claude server
+            raise LLMUnavailable(f"Model service error ({type(e).__name__}).") from e
         return LLMResponse([b.model_dump(exclude_none=True) for b in r.content], r.stop_reason or "end_turn",
                            r.usage.model_dump())
 
 
 class ScriptedLLM:
-    """Deterministic stand-in: call each read tool once, then propose by the same rules the system prompt states."""
+    """Deterministic stand-in: call each read tool once, then propose by the same rules the system prompt states.
 
-    model = "scripted"
+    ``flaw`` makes it fail in one specific way, so the routing golden set can drive every branch of the ladder:
+    ungrounded | unknown_part | no_isolation | priority_off | stale_unflagged | wrong_asset (a draft that
+    reconciliation catches), talker | loop | down (no draft at all)."""
+
+    provider = "scripted"
     ORDER = ("get_asset", "get_telemetry", "get_maintenance_history", "check_spare_parts")
+    FLAWS = ("ungrounded", "unknown_part", "no_isolation", "priority_off", "stale_unflagged", "wrong_asset",
+             "talker", "loop", "down")
+
+    def __init__(self, flaw: str | None = None, model: str = "scripted"):
+        if flaw is not None and flaw not in self.FLAWS:
+            raise ValueError(f"unknown flaw {flaw!r}")
+        self.flaw, self.model, self.calls = flaw, model, 0
 
     def create(self, messages: list[dict]) -> LLMResponse:
+        self.calls += 1
+        if self.flaw == "down":
+            raise LLMUnavailable("Model service unreachable.")
+        if self.flaw == "talker":
+            return LLMResponse([{"type": "text", "text": "The asset is probably fine."}], "end_turn")
+        if self.flaw == "loop":
+            return self._tool("get_asset", {"asset_id": self._asset_id(messages)}, len(messages))
         results = self._results(messages)
         for name in self.ORDER:
             if name not in results:
@@ -124,7 +155,23 @@ class ScriptedLLM:
         if results["get_telemetry"][1]:
             return LLMResponse([{"type": "text", "text": "I cannot ground a draft: telemetry is unavailable. "
                                                           "Retry once the historian is back."}], "end_turn")
-        return self._tool("propose_work_order", self._draft(results), len(results))
+        return self._tool("propose_work_order", self._spoil(self._draft(results)), len(results))
+
+    def _spoil(self, d: dict) -> dict:
+        f = self.flaw
+        if f == "ungrounded" and d["evidence"]:
+            d["evidence"][0] = {**d["evidence"][0], "value": round(d["evidence"][0]["value"] * 1.5 + 1, 2)}
+        elif f == "unknown_part":
+            d["parts"] = [*d["parts"], {"part_no": "SEP-AO-110", "qty": 1}]
+        elif f == "no_isolation":
+            d["safety"] = {**d["safety"], "energy_sources": d["safety"]["energy_sources"][:1]}
+        elif f == "priority_off":
+            d["priority"] = {"P1": "P2", "P2": "P3", "P3": "P4", "P4": "P3"}[d["priority"]]
+        elif f == "stale_unflagged":
+            d["needs_data_refresh"] = False
+        elif f == "wrong_asset":
+            d["asset_id"] = "P-102" if d["asset_id"] != "P-102" else "P-101"
+        return d
 
     # --- helpers ----------------------------------------------------------------------------------------------
     @staticmethod
@@ -196,5 +243,26 @@ class ScriptedLLM:
                 "needs_data_refresh": refresh}
 
 
-def make_llm(kind: str, model: str, max_tokens: int) -> LLM:
-    return AnthropicLLM(model, max_tokens) if kind == "anthropic" else ScriptedLLM()
+@dataclass(frozen=True)
+class Tier:
+    name: str            # local | frontier | demo | model (a single injected model, tests)
+    llm: LLM
+
+    def describe(self) -> dict:
+        return {"tier": self.name, "model": self.llm.model, "provider": getattr(self.llm, "provider", "unknown")}
+
+
+def make_tiers(settings) -> list[Tier]:
+    """The ladder from configuration. APP_LLM=scripted forces the demo model (tests, CI); APP_LLM=frontier skips the
+    local tier; the default (auto) uses every tier that is configured, and the demo model when none is."""
+    mode = settings.llm
+    if mode == "scripted":
+        return [Tier("demo", ScriptedLLM())]
+    tiers = []
+    if mode == "auto" and settings.local_base_url:
+        tiers.append(Tier("local", AnthropicLLM(settings.local_model, settings.max_output_tokens,
+                                                base_url=settings.local_base_url, api_key=settings.local_token or "none",
+                                                provider="ollama", timeout=settings.local_timeout_s)))
+    if settings.anthropic_configured:
+        tiers.append(Tier("frontier", AnthropicLLM(settings.model, settings.max_output_tokens)))
+    return tiers or [Tier("demo", ScriptedLLM())]

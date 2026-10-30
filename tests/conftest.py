@@ -50,8 +50,8 @@ def mailbox() -> Mailbox:
 def make_client(settings, mailbox):
     made = []
 
-    def make(llm=None, reset=True, s: Settings | None = None) -> TestClient:
-        c = TestClient(create_app(s or settings, llm=llm, send=mailbox, reset=reset))
+    def make(llm=None, reset=True, s: Settings | None = None, tiers=None, gov=None) -> TestClient:
+        c = TestClient(create_app(s or settings, llm=llm, send=mailbox, reset=reset, tiers=tiers, gov=gov))
         made.append(c)
         return c
     yield make

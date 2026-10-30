@@ -1,0 +1,7 @@
+{
+  "_doc": "Model ladder policy. A draft's confidence is computed by reconciliation, never reported by the model: start at 1.0, minus blocking_penalty per blocking issue and warning_penalty per warning. A tier's draft is accepted at or above its threshold; below it the next configured tier drafts again, and after the last tier a planner takes over. P1 work (critical finding on a high-criticality asset) needs a perfect local draft.",
+  "confidence": {"start": 1.0, "blocking_penalty": 0.5, "warning_penalty": 0.15},
+  "accept_threshold": {"local": 0.85, "frontier": 0.70, "demo": 0.70, "model": 0.70},
+  "priority_threshold": {"local": {"P1": 1.0}},
+  "escalate_on_data_outage": false
+}

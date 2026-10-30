@@ -6,7 +6,8 @@ from conftest import auth, decide, events, phases, run
 
 from app.llm import LLMResponse, LLMUnavailable
 
-ORDER = ["guard", "load_asset", "data_quality", "detect_anomalies", "alert", "agent_draft", "reconcile", "approval"]
+ORDER = ["guard", "load_asset", "data_quality", "detect_anomalies", "alert", "agent_draft", "reconcile", "route",
+         "approval"]
 
 
 class DownLLM:
