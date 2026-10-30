@@ -7,7 +7,6 @@ at load so that its newest reading lands just before start-up: the demo opens wi
 from __future__ import annotations
 
 import os
-import secrets
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -71,7 +70,8 @@ class Settings:
     max_output_tokens: int = 1500
     cmms_timeout_s: float = 2.0
     users: dict[str, tuple[str, str]] = field(default_factory=_users)
-    jwt_secret: str = field(default_factory=lambda: os.environ.get("APP_JWT_SECRET") or secrets.token_hex(32))
+    # Signs sign-in tokens. Unset: generated once and kept in the database, so a restart does not sign everyone out.
+    jwt_secret: str = field(default_factory=lambda: os.environ.get("APP_JWT_SECRET", ""))
     jwt_ttl_s: int = 8 * 3600
     # Gmail (or any SMTP) for alert e-mail. Unset = the e-mail channel is recorded as "disabled", nothing is sent.
     smtp_host: str = field(default_factory=lambda: os.environ.get("SMTP_HOST", ""))

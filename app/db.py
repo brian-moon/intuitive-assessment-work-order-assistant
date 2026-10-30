@@ -109,6 +109,13 @@ class Database:
         return {"categories": len(categories), "assets": len(assets), "readings": len(readings),
                 "history": len(history), "parts": len(parts), "rejected": len(rejected)}
 
+    def secret(self, name: str) -> str:
+        """A random secret generated on first use and kept in the database (concurrent first use: one wins)."""
+        import secrets
+        self.exec("INSERT INTO app_secrets (name, value) VALUES (%s, %s) ON CONFLICT (name) DO NOTHING",
+                  name, secrets.token_hex(32))
+        return self.row("SELECT value FROM app_secrets WHERE name = %s", name)["value"]
+
     # --- reads used by tools, the pipeline and the API -----------------------------------------------------------
     def category(self, name: str) -> Category:
         r = self.row("SELECT * FROM machine_categories WHERE category = %s", name)

@@ -74,6 +74,7 @@ def create_app(settings: Settings | None = None, llm: LLM | None = None, send=No
         log.info("seeded %s (time shift %s)", db.seed(settings.data_dir, shift), shift)
     for name, email in parse_recipients(settings.alert_emails):
         db.exec("INSERT INTO alert_recipients (name, email) VALUES (%s, %s) ON CONFLICT (email) DO NOTHING", name, email)
+    jwt_secret = settings.jwt_secret or db.secret("jwt_signing_key")
     faults = Faults()
     notifier = Notifier(db, faults, settings.public_url, send if send is not None else smtp_sender(settings),
                         settings.email_cooldown_min)
@@ -112,7 +113,7 @@ def create_app(settings: Settings | None = None, llm: LLM | None = None, send=No
         if not authorization or not authorization.startswith("Bearer "):
             raise HTTPException(401, "Sign in first.")
         try:
-            claims = jwt.decode(authorization[7:], settings.jwt_secret, algorithms=["HS256"])
+            claims = jwt.decode(authorization[7:], jwt_secret, algorithms=["HS256"])
         except jwt.PyJWTError:
             raise HTTPException(401, "Session expired or invalid; sign in again.") from None
         return {"name": claims["sub"], "role": claims["role"]}
@@ -131,7 +132,7 @@ def create_app(settings: Settings | None = None, llm: LLM | None = None, send=No
             time.sleep(0.3)
             raise HTTPException(401, "Wrong user name or password.")
         token = jwt.encode({"sub": body.username, "role": entry[1], "exp": int(time.time()) + settings.jwt_ttl_s},
-                           settings.jwt_secret, algorithm="HS256")
+                           jwt_secret, algorithm="HS256")
         return {"token": token, "user": body.username, "role": entry[1]}
 
     @app.get("/api/branding")

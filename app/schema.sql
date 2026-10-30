@@ -152,3 +152,10 @@ CREATE TABLE IF NOT EXISTS simulator (
     updated_by text,
     updated_at timestamptz NOT NULL DEFAULT now()
 );
+
+-- Generated secrets that must survive restarts (the token-signing key when APP_JWT_SECRET is not set).
+CREATE TABLE IF NOT EXISTS app_secrets (
+    name       text PRIMARY KEY,
+    value      text NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now()
+);

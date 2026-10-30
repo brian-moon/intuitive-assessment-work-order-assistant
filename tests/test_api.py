@@ -195,3 +195,12 @@ def test_viewers_never_see_recipient_addresses(client):
     hist = client.get("/api/history?start=2026-10-28T00:00:00Z&end=2026-11-30T00:00:00Z", headers=viewer).text
     live = client.get("/api/live/stream?seconds=1", headers=viewer).text
     assert "ops@x.org" not in hist and "ops@x.org" not in live
+
+
+def test_sign_in_survives_a_restart_without_a_configured_secret(make_client, settings):
+    from dataclasses import replace
+    s = replace(settings, jwt_secret="")
+    first = make_client(s=s)
+    token = auth(first, "planner")
+    restarted = make_client(s=s, reset=False)          # new process, same database
+    assert restarted.get("/api/me", headers=token).status_code == 200
