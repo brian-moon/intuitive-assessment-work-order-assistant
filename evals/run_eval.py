@@ -46,6 +46,17 @@ GROUNDING = {"ungrounded_evidence", "unknown_part", "wrong_asset", "unknown_asse
 USERS = {"eval": ("eval-runner-password", "admin")}
 
 
+def ensure_database(url: str) -> None:
+    """The evaluation resets its own database (never the app's); create it on first use."""
+    import psycopg
+    from psycopg.conninfo import conninfo_to_dict, make_conninfo
+
+    name = conninfo_to_dict(url)["dbname"]
+    with psycopg.connect(make_conninfo(url, dbname="postgres"), autocommit=True) as c:
+        if not c.execute("SELECT 1 FROM pg_database WHERE datname = %s", (name,)).fetchone():
+            c.execute(f'CREATE DATABASE "{name}"')
+
+
 def load_cases() -> list[dict]:
     return [json.loads(line) for line in (HERE / "cases.jsonl").read_text(encoding="utf-8").splitlines() if line.strip()]
 
@@ -99,7 +110,10 @@ def main() -> int:
     ap.add_argument("--out", default=str(ROOT / "reports"))
     args = ap.parse_args()
 
-    base = Settings(database_url=os.environ.get("TEST_DATABASE_URL", "postgresql://wo:wo-dev@127.0.0.1:5440/wo_test"),
+    url = os.environ.get("EVAL_DATABASE_URL") or os.environ.get("TEST_DATABASE_URL",
+                                                                 "postgresql://wo:wo-dev@127.0.0.1:5440/wo_test")
+    ensure_database(url)
+    base = Settings(database_url=url,
                     data_dir=ROOT / "data", users=USERS, jwt_secret="eval-runner-secret-0123456789abcdef")
     settings = replace(base, llm=args.llm)
     if args.llm == "frontier" and not settings.anthropic_configured:

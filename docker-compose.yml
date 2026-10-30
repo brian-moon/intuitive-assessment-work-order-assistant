@@ -1,4 +1,6 @@
-# Local PostgreSQL for development and tests. The API itself runs with uvicorn (see README).
+# docker compose up --build   ->   http://localhost:8790   (users planner / planner-demo, admin / admin-demo, viewer / viewer-demo)
+# Put ANTHROPIC_API_KEY=... in a .env file next to this one to use Claude Haiku 5.5; without it the app runs on the
+# labelled demo model. docker compose down -v starts again from the seed data.
 services:
   db:
     image: postgres:16
@@ -7,8 +9,36 @@ services:
       POSTGRES_PASSWORD: wo-dev
       POSTGRES_DB: wo
     ports:
-      - "127.0.0.1:5440:5432"
+      - "127.0.0.1:5440:5432"      # for running the tests from the host
+    volumes:
+      - pgdata:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U wo"]
       interval: 2s
-      retries: 20
+      retries: 30
+
+  app:
+    build: .
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://wo:wo-dev@db:5432/wo
+      EVAL_DATABASE_URL: postgresql://wo:wo-dev@db:5432/wo_eval
+      APP_DEMO_USERS: ${APP_DEMO_USERS:-1}
+      APP_USERS: ${APP_USERS:-}
+      APP_JWT_SECRET: ${APP_JWT_SECRET:-}
+      APP_LLM: ${APP_LLM:-auto}
+      APP_MODEL: ${APP_MODEL:-claude-haiku-5-5}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      APP_DEPLOYMENT: ${APP_DEPLOYMENT:-assessment}
+      APP_PUBLIC_URL: http://localhost:8790
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+    ports:
+      - "127.0.0.1:8790:8790"
+
+volumes:
+  pgdata:
