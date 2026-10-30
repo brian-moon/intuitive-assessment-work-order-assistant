@@ -74,6 +74,17 @@ def test_real_server_uses_tls_and_signs_in(settings, fake_smtp):
     assert s["starttls"] is True and s["login"] == "me@example.org" and "Importance" not in s["messages"][0]
 
 
+def test_a_real_server_without_tls_is_refused_before_signing_in(settings, fake_smtp):
+    """A server that does not offer STARTTLS (or a man in the middle that strips it) never gets the password."""
+    fake_smtp.tls = False
+    send = notify.smtp_sender(replace(settings, smtp_host="smtp.example.org", smtp_port=587, smtp_user="me@example.org",
+                                      smtp_password="app-password", smtp_from="me@example.org"))
+    with pytest.raises(notify.smtplib.SMTPNotSupportedError):
+        send("ops@x.org", "[CRITICAL] P-101", "body")
+    s = fake_smtp.sessions[-1]
+    assert s["login"] is None and s["messages"] == []
+
+
 def test_dashboard_tells_whether_anyone_receives_alerts(make_client, settings):
     plain = make_client()
     d = plain.get("/api/dashboard", headers=auth(plain, "viewer")).json()

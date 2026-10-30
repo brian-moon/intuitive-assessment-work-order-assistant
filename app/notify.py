@@ -29,8 +29,8 @@ ORDER = {"warning": 1, "critical": 2}
 
 
 def smtp_sender(settings) -> Callable[..., None] | None:
-    """SMTP delivery, or None (e-mail recorded as disabled) without a host. Signs in only when a user and password are
-    set (the local test inbox needs neither) and uses STARTTLS whenever the server offers it."""
+    """SMTP delivery, or None (e-mail recorded as disabled) without a host. STARTTLS is required for every server except
+    the local test inbox ("mailpit"); it signs in only when a user and password are set (the test inbox needs neither)."""
     if not settings.smtp_host:
         return None
 
@@ -47,6 +47,10 @@ def smtp_sender(settings) -> Callable[..., None] | None:
             if s.has_extn("starttls"):
                 s.starttls(context=ssl.create_default_context())
                 s.ehlo()
+            elif settings.smtp_host != "mailpit":
+                # Only the local test inbox may be plain text. Anything else must encrypt: a server (or someone in the
+                # path) that drops STARTTLS would otherwise receive the password and the message in clear text.
+                raise smtplib.SMTPNotSupportedError(f"{settings.smtp_host} does not offer STARTTLS; refusing to send")
             if settings.smtp_user and settings.smtp_password:
                 s.login(settings.smtp_user, settings.smtp_password)
             s.send_message(msg)

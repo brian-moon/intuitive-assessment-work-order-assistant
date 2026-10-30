@@ -162,11 +162,11 @@ behaviour is measured separately by the evaluation (below), where variance is ex
 | `tests/test_api.py` | sign-in, roles, validation, not-found, conflicts, rate limit, recipients, governance overview |
 | `tests/test_data.py` | every source row loaded or rejected with a reason; the dashboard and the work order match the raw files, recomputed independently; schema upgrade of an older database |
 | `tests/test_routing_golden.py` | 24 cases (`evals/routing_golden.jsonl`) over every flaw, ladder shape and final route, with deterministic flawed stand-in models |
-| `tests/test_mail.py` | mail client against a fake server: no sign-in or TLS for the test inbox, TLS and sign-in for a real server, high importance on critical mail; the recipient prompt's data never reveals addresses |
+| `tests/test_mail.py` | mail client against a fake server: no sign-in or TLS for the test inbox, TLS and sign-in for a real server, a real server without TLS refused before the password is sent, high importance on critical mail; the recipient prompt's data never reveals addresses |
 | `tests/test_live.py` | simulator values land in the requested threshold band; events are stored, scanned and alerted; e-mail cooldown; simulated readings never e-mail; live stream, its connection cap, history windows, live clock |
 | `tests/test_browser.py` | in Chromium: sign in, blinking alert banner, streamed run, every reconciliation rule passed, approval, work order, governance, browser back/forward; live feed and simulator switch, history charts, scroll position restored; an admin registers the alert recipient from the dashboard prompt |
 
-Tests use the scripted model: deterministic, no key, no tokens, no mail. 139 tests plus 3 browser tests pass.
+Tests use the scripted model: deterministic, no key, no tokens, no mail. 140 tests plus 3 browser tests pass.
 
 ### AI evaluation
 
