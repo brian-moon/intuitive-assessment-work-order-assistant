@@ -1,0 +1,8 @@
+{
+  "task_completion": 0.85,
+  "groundedness": 1.0,
+  "relevance": 0.9,
+  "tool_accuracy": 0.9,
+  "safety": 1.0,
+  "failure_handling": 0.9
+}
