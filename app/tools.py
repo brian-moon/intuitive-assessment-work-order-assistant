@@ -44,7 +44,9 @@ TOOL_SPECS: list[dict] = [
          "asset_id": {**ASSET_ID, "description": "The asset the planner selected (never another one)."},
          "priority": {"type": "string", "enum": ["P1", "P2", "P3", "P4"]},
          "problem_summary": {"type": "string", "description": "One to three sentences, at most 600 characters."},
-         "evidence": {"type": "array", "items": _obj({
+         "evidence": {"type": "array", "description": "At least one reading. For a routine check with nothing "
+                                                      "abnormal, cite the latest reading of each metric.",
+                      "items": _obj({
              "metric": {"type": "string"}, "value": {"type": "number"}, "unit": {"type": "string"},
              "timestamp": {"type": "string", "description": "Copied exactly from get_telemetry, ISO 8601 such as "
                                                             "2026-10-29T10:00:00Z."}},
