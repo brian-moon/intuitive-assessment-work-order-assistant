@@ -7,7 +7,7 @@ e-mails exactly as real telemetry would.
 
 The switch, rate (per minute or per hour) and mix live in the ``simulator`` table, so they survive restarts and every
 browser sees the same state. A background thread does the work; events are spaced at random (a Poisson process) at
-the requested average rate. ``SIM_AUTOSTART=1`` starts it enabled (daemon-style, always on).
+the requested average rate. It starts enabled at 6 events per minute (``SIM_AUTOSTART=0`` starts it off).
 """
 from __future__ import annotations
 

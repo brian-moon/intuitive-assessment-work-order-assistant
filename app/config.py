@@ -85,7 +85,7 @@ class Settings:
     # One e-mail per asset, metric and severity per recipient within this window; the dashboard still shows every alert.
     email_cooldown_min: int = field(default_factory=lambda: int(os.environ.get("ALERT_EMAIL_COOLDOWN_MIN", "15")))
     # Live telemetry simulator: on/off and rate are changed on the dashboard; these are the start-up values.
-    sim_autostart: bool = field(default_factory=lambda: _env_bool("SIM_AUTOSTART"))
+    sim_autostart: bool = field(default_factory=lambda: _env_bool("SIM_AUTOSTART", "1"))
     sim_rate: float = field(default_factory=lambda: float(os.environ.get("SIM_RATE", "6")))
     sim_unit: str = field(default_factory=lambda: os.environ.get("SIM_UNIT", "minute"))
 

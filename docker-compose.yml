@@ -43,7 +43,7 @@ services:
       SMTP_USER: ${SMTP_USER:-}
       SMTP_PASSWORD: ${SMTP_PASSWORD:-}
       SMTP_FROM: ${SMTP_FROM:-}
-      SIM_AUTOSTART: ${SIM_AUTOSTART:-0}
+      SIM_AUTOSTART: ${SIM_AUTOSTART:-1}
       SIM_RATE: ${SIM_RATE:-6}
       SIM_UNIT: ${SIM_UNIT:-minute}
       APP_BRAND_NAME: ${APP_BRAND_NAME:-Work-order assistant}

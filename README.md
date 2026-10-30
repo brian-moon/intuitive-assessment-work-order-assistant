@@ -45,7 +45,7 @@ localhost.
 1. Sign in as `planner`. The red banner blinks while critical alerts are open (the tab title flashes too; the bell
    in the header adds a sound).
 2. **Dashboard, Live**: asset cards by status, a live readings feed, and the **telemetry simulator**: switch it on and
-   set events per minute or per hour; each event is a random machine and metric with a random normal / warning /
+   it runs from start-up at 6 events per minute (switch it off, or change the rate per minute or per hour); each event is a random machine and metric with a random normal / warning /
    critical status. Critical readings raise the banner, a toast and the alert e-mails as they arrive.
    **History** shows any past window (1 h to 30 days, or custom): a summary per asset, or charts per metric with the
    warning and critical lines, and the alerts, runs and work orders of that window.
