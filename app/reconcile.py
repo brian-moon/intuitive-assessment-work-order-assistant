@@ -26,6 +26,48 @@ def expected_priority(severity: str, criticality: str) -> str:
     return PRIORITY.get((severity, criticality), "P4")
 
 
+# The rules, in the order they are shown. Each issue code below belongs to exactly one rule.
+RULES = [
+    {"id": "asset", "title": "Right asset", "codes": ["wrong_asset", "unknown_asset"], "severity": "blocking",
+     "checks": "The draft is for the asset the planner asked about, and that asset exists."},
+    {"id": "evidence", "title": "Evidence is grounded", "codes": ["ungrounded_evidence"], "severity": "blocking",
+     "checks": "Every quoted reading matches a recorded reading: metric, timestamp and value within the category's "
+               "tolerance."},
+    {"id": "anomaly", "title": "The anomaly is addressed", "codes": ["anomaly_not_addressed"], "severity": "blocking",
+     "checks": "The evidence cites at least one metric that is over its warning or critical threshold."},
+    {"id": "parts", "title": "Parts exist and fit", "codes": ["unknown_part"], "severity": "blocking",
+     "checks": "Every part is a stocked part listed for this machine category."},
+    {"id": "isolation", "title": "Isolation is complete", "codes": ["unsafe_isolation"], "severity": "blocking",
+     "checks": "Lockout/tagout is required and covers every energy source of the asset."},
+    {"id": "data", "title": "Data quality is flagged", "codes": ["data_quality_unflagged"], "severity": "blocking",
+     "checks": "If the telemetry is older than the category's data-age limit, or some readings were rejected, the "
+               "draft says the data must be confirmed."},
+    {"id": "stock", "title": "Parts are in stock", "codes": ["backorder"], "severity": "warning",
+     "checks": "The quantity asked for is on hand; otherwise the planner is warned about the lead time."},
+    {"id": "priority", "title": "Priority follows the rule", "codes": ["priority_mismatch"], "severity": "warning",
+     "checks": "Worst severity x asset criticality: critical on high = P1, on medium = P2, on low = P3; warning on high "
+               "= P2, on medium = P3, on low = P4; nothing abnormal = P4."},
+]
+
+
+def rule_card(db: Database, asset_id: str, now: datetime) -> dict:
+    """The rules with the parameters that apply to this asset (its machine category's limits)."""
+    asset = db.asset(asset_id)
+    cat = db.category(asset.category)
+    worst = max((f["severity"] for f in classify_asset(db, asset_id, now)), key=RANK.get, default="normal")
+    params = {
+        "asset": asset.asset_id,
+        "evidence": f"tolerance {cat.evidence_tolerance:g} ({cat.label.lower()})",
+        "anomaly": ", ".join(f"{m} warn {r.warning:g} / crit {r.critical:g} {r.unit}" for m, r in sorted(cat.metrics.items())),
+        "parts": f"fits {cat.label.lower()}",
+        "isolation": ", ".join(asset.energy_sources),
+        "data": f"max age {cat.max_data_age_h:g} h",
+        "stock": "on hand vs requested",
+        "priority": f"{worst} on {asset.criticality} criticality = {expected_priority(worst, asset.criticality)}",
+    }
+    return {"asset_id": asset_id, "category": cat.label, "rules": [{**r, "parameter": params[r["id"]]} for r in RULES]}
+
+
 def reconcile(draft: WorkOrderDraft, db: Database, now: datetime, requested_asset: str) -> list[dict]:
     issues: list[dict] = []
 

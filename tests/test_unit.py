@@ -184,3 +184,13 @@ def test_usage_cost_uses_haiku_prices_and_cache_discount():
     u = Usage()
     u.add("claude-haiku-5-5", {"input_tokens": 1_000_000, "output_tokens": 100_000, "cache_read_input_tokens": 1_000_000})
     assert u.calls == 1 and round(u.cost_usd, 4) == round(0.10 + 0.05 + 0.01, 4)
+
+
+def test_every_issue_code_belongs_to_exactly_one_rule():
+    import re
+    from pathlib import Path
+
+    from app.reconcile import RULES
+    codes = [c for r in RULES for c in r["codes"]]
+    emitted = set(re.findall(r'add\("(?:blocking|warning)", "([a-z_]+)"', Path("app/reconcile.py").read_text()))
+    assert len(codes) == len(set(codes)) and set(codes) == emitted

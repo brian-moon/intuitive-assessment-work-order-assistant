@@ -176,3 +176,22 @@ def test_alert_emails_from_the_environment_are_registered(make_client, settings)
     c = make_client(s=replace(settings, alert_emails="Ops Lead <Ops@Plant.example>, night@plant.example, not-an-email"))
     got = c.get("/api/admin/recipients", headers=auth(c, "admin")).json()
     assert [(r["name"], r["email"]) for r in got] == [("Ops Lead", "ops@plant.example"), ("night", "night@plant.example")]
+
+
+def test_reconciliation_rule_card(client):
+    viewer = auth(client, "viewer")
+    card = client.get("/api/reconciliation/rules?asset_id=S-401", headers=viewer).json()
+    by = {r["id"]: r for r in card["rules"]}
+    assert card["category"]
+    assert by["data"]["parameter"] == "max age 8 h" and by["isolation"]["parameter"] == "electrical, mechanical"
+    assert by["priority"]["parameter"].endswith("= P1") and card["policy"]["confidence"]["blocking_penalty"] == 0.5
+    assert client.get("/api/reconciliation/rules?asset_id=Z-999", headers=viewer).status_code == 404
+
+
+def test_viewers_never_see_recipient_addresses(client):
+    admin, viewer = auth(client, "admin"), auth(client, "viewer")
+    client.post("/api/admin/recipients", headers=admin, json={"name": "Ops", "email": "ops@x.org"})
+    client.post("/api/simulator/emit", headers=admin)
+    hist = client.get("/api/history?start=2026-10-28T00:00:00Z&end=2026-11-30T00:00:00Z", headers=viewer).text
+    live = client.get("/api/live/stream?seconds=1", headers=viewer).text
+    assert "ops@x.org" not in hist and "ops@x.org" not in live

@@ -12,6 +12,7 @@ the requested average rate. ``SIM_AUTOSTART=1`` starts it enabled (daemon-style,
 from __future__ import annotations
 
 import logging
+import math
 import random
 import threading
 from collections.abc import Callable
@@ -72,8 +73,9 @@ class Simulator:
         if unit not in ("minute", "hour") or rate <= 0 or (rate if unit == "minute" else rate / 60) > MAX_PER_MINUTE:
             raise ValueError(f"rate must be above 0 and at most {MAX_PER_MINUTE} per minute")
         if mix is not None:
-            if set(mix) != set(DEFAULT_MIX) or any(v < 0 for v in mix.values()) or sum(mix.values()) <= 0:
-                raise ValueError("mix needs non-negative normal, warning and critical weights")
+            if (set(mix) != set(DEFAULT_MIX) or not all(math.isfinite(v) and 0 <= v <= 1000 for v in mix.values())
+                    or sum(mix.values()) <= 0):
+                raise ValueError("mix needs normal, warning and critical weights between 0 and 1000, not all zero")
             total = sum(mix.values())
             mix = {k: round(v / total, 4) for k, v in mix.items()}
         self.db.exec("UPDATE simulator SET enabled = %s, rate = %s, unit = %s, mix = %s, updated_by = %s, "

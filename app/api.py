@@ -10,6 +10,7 @@ import hmac
 import json
 import logging
 import re
+import threading
 import time
 import uuid
 from datetime import datetime, timedelta
@@ -34,7 +35,7 @@ from .models import Decision, Login, Recipient, RunRequest, SimulatorUpdate
 from .notify import Notifier, smtp_sender
 from .observability import finished_spans, setup
 from .pipeline import Pipeline
-from .reconcile import has_blocking
+from .reconcile import has_blocking, rule_card
 from .routing import Policy
 from .simulator import Simulator
 from .tools import Toolbox
@@ -207,8 +208,11 @@ def create_app(settings: Settings | None = None, llm: LLM | None = None, send=No
                 "unit": r["unit"], "ts": r["ts"], "source": r["source"],
                 "severity": severity_of(r["asset_id"], r["metric"], r["value"]), "backlog": backlog}
 
+    streams: dict[str, int] = {"total": 0}     # each open stream holds a worker thread: cap them
+    stream_lock = threading.Lock()
+
     @app.get("/api/live/stream")
-    def live_stream(seconds: int = 600, _: dict = Depends(user)):
+    def live_stream(seconds: int = 600, u: dict = Depends(user)):
         """Server-sent events: new readings and new alerts as they are stored, and a heartbeat with the simulator
         state every few seconds. The stream ends after ``seconds`` (at most 10 minutes); the browser reconnects."""
         seconds = max(1, min(seconds, 600))
@@ -225,15 +229,30 @@ def create_app(settings: Settings | None = None, llm: LLM | None = None, send=No
                                  "ORDER BY id LIMIT 200", last_t):
                     last_t = r["id"]
                     yield reading_event(r)
-                for n in db.rows("SELECT id, channel, recipient, severity, asset_id, subject, status, created_at "
+                for n in db.rows("SELECT id, channel, severity, asset_id, subject, status, created_at "
                                  "FROM notifications WHERE id > %s ORDER BY id LIMIT 200", last_n):
                     last_n = n["id"]
-                    yield {"type": "alert", **n}
+                    if n["channel"] == "dashboard":       # e-mail rows name recipients: planners see those in Admin
+                        yield {"type": "alert", **n}
                 if time.time() - beat > 5:
                     beat = time.time()
                     yield {"type": "heartbeat", "now": settings.now, "simulator": sim.state()}
                 time.sleep(1)
-        return sse(gen())
+        key = u["name"]
+        with stream_lock:
+            if streams["total"] >= 20 or streams.get(key, 0) >= 3:
+                raise HTTPException(429, "Too many live streams open; close another tab.")
+            streams["total"] += 1
+            streams[key] = streams.get(key, 0) + 1
+
+        def counted():
+            try:
+                yield from gen()
+            finally:
+                with stream_lock:
+                    streams["total"] -= 1
+                    streams[key] -= 1
+        return sse(counted())
 
     @app.get("/api/history")
     def history(start: datetime, end: datetime, asset_id: str | None = None, _: dict = Depends(user)) -> dict:
@@ -264,8 +283,8 @@ def create_app(settings: Settings | None = None, llm: LLM | None = None, send=No
         aw = "created_at >= %s AND created_at < %s" + (" AND asset_id = %s" if asset_id else "")
         out = {"start": start, "end": end, "asset_id": asset_id, "truncated": truncated,
                "summary": sorted(summary.values(), key=lambda x: (-x["critical"], -x["warning"], x["asset_id"])),
-               "alerts": db.rows(f"SELECT id, channel, recipient, severity, asset_id, subject, status, created_at, "
-                                 f"acknowledged_at FROM notifications WHERE {aw} ORDER BY created_at DESC LIMIT 500", *args),
+               "alerts": db.rows(f"SELECT id, severity, asset_id, subject, created_at, acknowledged_at FROM notifications "
+                                 f"WHERE channel = 'dashboard' AND {aw} ORDER BY created_at DESC LIMIT 500", *args),
                "runs": db.rows(f"SELECT run_id, asset_id, status, route, priority, started_by, created_at FROM runs "
                                f"WHERE {aw} ORDER BY created_at DESC LIMIT 200", *args),
                "work_orders": db.rows(f"SELECT work_order, asset_id, priority, title, cmms_status, created_at FROM work_orders "
@@ -341,6 +360,12 @@ def create_app(settings: Settings | None = None, llm: LLM | None = None, send=No
             "evals": evals, "telemetry": {**gov.status(), "otlp": bool(settings.trustplane_url and settings.trustplane_token)},
             "recent": recent,
         }
+
+    @app.get("/api/reconciliation/rules")
+    def reconciliation_rules(asset_id: str, _: dict = Depends(user)) -> dict:
+        if db.asset(asset_id) is None:
+            raise HTTPException(404, f"No asset {asset_id}.")
+        return {**rule_card(db, asset_id, settings.now), "policy": policy.as_dict()}
 
     @app.get("/api/categories")
     def categories(_: dict = Depends(user)) -> list[dict]:
