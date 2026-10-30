@@ -79,8 +79,14 @@ def _z(ts: datetime) -> str:
 
 
 class Toolbox:
-    def __init__(self, db: Database, faults: Faults, now: datetime):
-        self.db, self.faults, self.now = db, faults, now
+    def __init__(self, db: Database, faults: Faults, now):
+        """``now``: a datetime (fixed) or a zero-argument callable (the live clock)."""
+        self.db, self.faults = db, faults
+        self._clock = now if callable(now) else (lambda: now)
+
+    @property
+    def now(self) -> datetime:
+        return self._clock()
 
     def run(self, name: str, args: dict) -> ToolResult:
         try:

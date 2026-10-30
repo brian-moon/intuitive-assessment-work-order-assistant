@@ -146,3 +146,11 @@ class Recipient(BaseModel):
         if not EMAIL.match(v):
             raise ValueError("not a valid e-mail address")
         return v.lower()
+
+
+class SimulatorUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    enabled: bool | None = None
+    rate: float | None = Field(default=None, gt=0, le=7200)
+    unit: Literal["minute", "hour"] | None = None
+    mix: dict[str, float] | None = None

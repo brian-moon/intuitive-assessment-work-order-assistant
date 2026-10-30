@@ -1,7 +1,8 @@
 """Runtime settings, read once from the environment.
 
-The clock is pinned (``APP_NOW``) so that "is this telemetry stale?" gives the same answer in tests, in the
-evaluation and in the demo. In production it would be the real clock.
+Clock: the real clock by default (live mode). ``APP_NOW`` pins it, so that "is this telemetry stale?" gives the same
+answer every time; tests and the evaluation pin it to ``SEED_ANCHOR``. With the real clock the seed data is shifted
+at load so that its newest reading lands just before start-up: the demo opens with the same alarms, then ages.
 """
 from __future__ import annotations
 
@@ -14,9 +15,16 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 
 
-def _now() -> datetime:
-    raw = os.environ.get("APP_NOW", "2026-10-29T12:00:00Z")
-    return datetime.fromisoformat(raw.replace("Z", "+00:00")).astimezone(UTC)
+SEED_ANCHOR = datetime(2026, 10, 29, 12, 0, tzinfo=UTC)   # the "now" the seed data was written for
+
+
+def _pinned() -> datetime | None:
+    raw = os.environ.get("APP_NOW", "")
+    return datetime.fromisoformat(raw.replace("Z", "+00:00")).astimezone(UTC) if raw else None
+
+
+def _env_bool(name: str, default: str = "0") -> bool:
+    return os.environ.get(name, default).strip().lower() in ("1", "true", "yes", "on")
 
 
 def _users() -> dict[str, tuple[str, str]]:
@@ -42,7 +50,7 @@ class Settings:
     database_url: str = field(default_factory=lambda: os.environ.get(
         "DATABASE_URL", "postgresql://wo:wo-dev@127.0.0.1:5440/wo"))
     data_dir: Path = field(default_factory=lambda: Path(os.environ.get("APP_DATA_DIR", ROOT / "data")))
-    now: datetime = field(default_factory=_now)
+    pinned_now: datetime | None = field(default_factory=_pinned)
     # Model ladder (routing.py). auto = every configured tier: local (LOCAL_LLM_BASE_URL) -> frontier
     # (ANTHROPIC_API_KEY) -> planner; neither configured = deterministic demo model. frontier = skip the local tier.
     # scripted = demo model only (tests, CI).
@@ -72,3 +80,25 @@ class Settings:
     smtp_password: str = field(default_factory=lambda: os.environ.get("SMTP_PASSWORD", ""))
     smtp_from: str = field(default_factory=lambda: os.environ.get("SMTP_FROM", os.environ.get("SMTP_USER", "")))
     public_url: str = field(default_factory=lambda: os.environ.get("APP_PUBLIC_URL", "http://127.0.0.1:8790"))
+    # Recipients registered at start-up, "Name <a@b.org>, c@d.org" (more can be added on the Admin screen).
+    alert_emails: str = field(default_factory=lambda: os.environ.get("ALERT_EMAILS", ""))
+    # One e-mail per asset, metric and severity per recipient within this window; the dashboard still shows every alert.
+    email_cooldown_min: int = field(default_factory=lambda: int(os.environ.get("ALERT_EMAIL_COOLDOWN_MIN", "15")))
+    # Live telemetry simulator: on/off and rate are changed on the dashboard; these are the start-up values.
+    sim_autostart: bool = field(default_factory=lambda: _env_bool("SIM_AUTOSTART"))
+    sim_rate: float = field(default_factory=lambda: float(os.environ.get("SIM_RATE", "6")))
+    sim_unit: str = field(default_factory=lambda: os.environ.get("SIM_UNIT", "minute"))
+
+    # Branding: a logo file you place in ./branding (not in the repository) and the names shown in the header.
+    brand_name: str = field(default_factory=lambda: os.environ.get("APP_BRAND_NAME", "Work-order assistant"))
+    brand_subtitle: str = field(default_factory=lambda: os.environ.get("APP_BRAND_SUBTITLE", "Maintenance operations"))
+    brand_logo: str = field(default_factory=lambda: os.environ.get("APP_BRAND_LOGO", ""))
+    brand_dir: Path = field(default_factory=lambda: Path(os.environ.get("APP_BRAND_DIR", ROOT / "branding")))
+
+    @property
+    def now(self) -> datetime:
+        return self.pinned_now or datetime.now(UTC)
+
+    @property
+    def live(self) -> bool:
+        return self.pinned_now is None

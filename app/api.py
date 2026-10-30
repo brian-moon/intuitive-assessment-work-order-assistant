@@ -9,8 +9,10 @@ from __future__ import annotations
 import hmac
 import json
 import logging
+import re
 import time
 import uuid
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import jwt
@@ -24,16 +26,17 @@ from psycopg_pool import ConnectionPool
 
 from . import anomaly
 from .cmms import MockCMMS
-from .config import Settings
+from .config import SEED_ANCHOR, Settings
 from .db import Database
 from .faults import Faults
 from .llm import LLM, Tier, make_tiers
-from .models import Decision, Login, Recipient, RunRequest
+from .models import Decision, Login, Recipient, RunRequest, SimulatorUpdate
 from .notify import Notifier, smtp_sender
 from .observability import finished_spans, setup
 from .pipeline import Pipeline
 from .reconcile import has_blocking
 from .routing import Policy
+from .simulator import Simulator
 from .tools import Toolbox
 from .trustplane import GovernanceSink
 
@@ -41,6 +44,18 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name
 log = logging.getLogger("app.api")
 DIST = Path(__file__).resolve().parent.parent / "frontend" / "dist"
 RANKS = {"viewer": 0, "planner": 1, "admin": 2}
+
+
+def parse_recipients(raw: str) -> list[tuple[str, str]]:
+    """``Name <a@b.org>, c@d.org`` -> [(name, email)]; entries that are not an address are skipped with a warning."""
+    out = []
+    for item in filter(None, (x.strip() for x in raw.split(","))):
+        m = re.fullmatch(r"(?:(.*?)\s*<)?([^<>\s]+@[^<>\s]+\.[^<>\s]+)>?", item)
+        if not m:
+            log.warning("ALERT_EMAILS entry %r is not an e-mail address; skipped", item)
+            continue
+        out.append(((m.group(1) or m.group(2).split("@")[0]).strip(), m.group(2).lower()))
+    return out
 
 
 def create_app(settings: Settings | None = None, llm: LLM | None = None, send=None, reset: bool = False,
@@ -53,9 +68,14 @@ def create_app(settings: Settings | None = None, llm: LLM | None = None, send=No
     if reset:
         db.reset()
     if not db.row("SELECT 1 AS x FROM assets LIMIT 1"):
-        log.info("seeded %s", db.seed(settings.data_dir))
+        # live clock: move the seed data so its newest reading is just before now (same alarms, current times)
+        shift = timedelta(minutes=int((settings.now - SEED_ANCHOR).total_seconds() // 60)) if settings.live else timedelta(0)
+        log.info("seeded %s (time shift %s)", db.seed(settings.data_dir, shift), shift)
+    for name, email in parse_recipients(settings.alert_emails):
+        db.exec("INSERT INTO alert_recipients (name, email) VALUES (%s, %s) ON CONFLICT (email) DO NOTHING", name, email)
     faults = Faults()
-    notifier = Notifier(db, faults, settings.public_url, send if send is not None else smtp_sender(settings))
+    notifier = Notifier(db, faults, settings.public_url, send if send is not None else smtp_sender(settings),
+                        settings.email_cooldown_min)
     findings = anomaly.scan(db, settings.now)
     notifier.alert(findings)
 
@@ -68,15 +88,19 @@ def create_app(settings: Settings | None = None, llm: LLM | None = None, send=No
     gov = gov or GovernanceSink(settings.trustplane_url, settings.trustplane_token, settings.trustplane_producer,
                                 settings.deployment)
     tracer = setup(settings.trustplane_url, settings.trustplane_token, settings.deployment)
-    pipeline = Pipeline(db, tiers, Toolbox(db, faults, settings.now), notifier, MockCMMS(faults, settings.cmms_timeout_s),
+    pipeline = Pipeline(db, tiers, Toolbox(db, faults, lambda: settings.now), notifier, MockCMMS(faults, settings.cmms_timeout_s),
                         settings, saver, tracer, policy, gov)
     log.info("model ladder: %s -> planner", " -> ".join(f"{t.name}:{t.llm.model}" for t in tiers))
 
     app = FastAPI(title="Maintenance work-order assistant", version="0.2.0")
     app.state.settings, app.state.db, app.state.faults, app.state.pipeline = settings, db, faults, pipeline
     app.state.notifier, app.state.tiers, app.state.policy, app.state.gov = notifier, tiers, policy, gov
+    sim = Simulator(db, notifier, lambda: settings.now, autostart=settings.sim_autostart, rate=settings.sim_rate,
+                    unit=settings.sim_unit, start_thread=settings.live)
+    app.state.simulator = sim
 
     def close() -> None:   # release both connection pools (tests create many apps; a server process exits instead)
+        sim.close()
         gov.close()
         saver_pool.close()
         db.close()
@@ -108,6 +132,14 @@ def create_app(settings: Settings | None = None, llm: LLM | None = None, send=No
         token = jwt.encode({"sub": body.username, "role": entry[1], "exp": int(time.time()) + settings.jwt_ttl_s},
                            settings.jwt_secret, algorithm="HS256")
         return {"token": token, "user": body.username, "role": entry[1]}
+
+    @app.get("/api/branding")
+    def branding() -> dict:
+        """Public (the sign-in page shows it). The logo is a file the operator put in the branding folder."""
+        name = Path(settings.brand_logo).name
+        logo = f"/branding/{name}" if name and (settings.brand_dir / name).is_file() else None
+        return {"name": settings.brand_name, "subtitle": settings.brand_subtitle, "logo": logo,
+                "deployment": settings.deployment}
 
     @app.get("/api/me")
     def me(u: dict = Depends(user)) -> dict:
@@ -142,7 +174,108 @@ def create_app(settings: Settings | None = None, llm: LLM | None = None, send=No
                          "ORDER BY created_at DESC LIMIT 10")
         return {"assets": assets, "alerts": alerts, "pending_approvals": pending, "work_orders": orders,
                 "rejected_rows": db.rows("SELECT source, asset_id, reason FROM data_rejections ORDER BY id"),
-                "email": "enabled" if notifier.send is not None else "disabled"}
+                "email": "enabled" if notifier.send is not None else "disabled",
+                "now": settings.now, "live_clock": settings.live, "simulator": sim.state()}
+
+    # --- live telemetry and history -------------------------------------------------------------------------------
+    @app.get("/api/simulator")
+    def simulator_state(_: dict = Depends(user)) -> dict:
+        return sim.state()
+
+    @app.put("/api/simulator")
+    def simulator_update(body: SimulatorUpdate, u: dict = Depends(need("planner"))) -> dict:
+        try:
+            return sim.update(u["name"], **body.model_dump())
+        except ValueError as e:
+            raise HTTPException(422, str(e)) from None
+
+    @app.post("/api/simulator/emit")
+    def simulator_emit(_: dict = Depends(need("planner"))) -> dict:
+        """One event now, whatever the switch says (for a quick look without waiting)."""
+        return sim.emit_one()
+
+    rules_cache: dict[str, dict] = {}
+
+    def severity_of(asset_id: str, metric: str, value: float) -> str:
+        if asset_id not in rules_cache:
+            rules_cache[asset_id] = db.category(db.asset(asset_id).category).metrics
+        rule = rules_cache[asset_id].get(metric)
+        return rule.severity(value) if rule else "normal"
+
+    def reading_event(r: dict, backlog: bool = False) -> dict:
+        return {"type": "reading", "id": r["id"], "asset_id": r["asset_id"], "metric": r["metric"], "value": r["value"],
+                "unit": r["unit"], "ts": r["ts"], "source": r["source"],
+                "severity": severity_of(r["asset_id"], r["metric"], r["value"]), "backlog": backlog}
+
+    @app.get("/api/live/stream")
+    def live_stream(seconds: int = 600, _: dict = Depends(user)):
+        """Server-sent events: new readings and new alerts as they are stored, and a heartbeat with the simulator
+        state every few seconds. The stream ends after ``seconds`` (at most 10 minutes); the browser reconnects."""
+        seconds = max(1, min(seconds, 600))
+        def gen():
+            recent = db.rows("SELECT id, asset_id, metric, value, unit, ts, source FROM telemetry "
+                             "ORDER BY ts DESC, id DESC LIMIT 20")
+            for r in reversed(recent):
+                yield reading_event(r, backlog=True)
+            last_t = db.row("SELECT coalesce(max(id), 0) AS m FROM telemetry")["m"]
+            last_n = db.row("SELECT coalesce(max(id), 0) AS m FROM notifications")["m"]
+            started, beat = time.time(), 0.0
+            while time.time() - started < seconds:
+                for r in db.rows("SELECT id, asset_id, metric, value, unit, ts, source FROM telemetry WHERE id > %s "
+                                 "ORDER BY id LIMIT 200", last_t):
+                    last_t = r["id"]
+                    yield reading_event(r)
+                for n in db.rows("SELECT id, channel, recipient, severity, asset_id, subject, status, created_at "
+                                 "FROM notifications WHERE id > %s ORDER BY id LIMIT 200", last_n):
+                    last_n = n["id"]
+                    yield {"type": "alert", **n}
+                if time.time() - beat > 5:
+                    beat = time.time()
+                    yield {"type": "heartbeat", "now": settings.now, "simulator": sim.state()}
+                time.sleep(1)
+        return sse(gen())
+
+    @app.get("/api/history")
+    def history(start: datetime, end: datetime, asset_id: str | None = None, _: dict = Depends(user)) -> dict:
+        """Past data for a time window: per asset a summary, or for one asset every reading with its thresholds,
+        and the alerts, runs and work orders of the window."""
+        if end <= start:
+            raise HTTPException(422, "end must be after start")
+        if end - start > timedelta(days=93):
+            raise HTTPException(422, "the window is limited to 93 days")
+        where, args = "ts >= %s AND ts < %s", [start, end]
+        if asset_id:
+            if db.asset(asset_id) is None:
+                raise HTTPException(404, f"No asset {asset_id}.")
+            where += " AND asset_id = %s"
+            args.append(asset_id)
+        readings = db.rows(f"SELECT id, asset_id, metric, value, unit, ts, source FROM telemetry WHERE {where} "
+                           "ORDER BY ts LIMIT 5001", *args)
+        truncated = len(readings) > 5000
+        readings = [{**reading_event(r), "type": None} for r in readings[:5000]]
+        summary: dict[str, dict] = {}
+        for r in readings:
+            s = summary.setdefault(r["asset_id"], {"asset_id": r["asset_id"], "readings": 0, "warning": 0, "critical": 0,
+                                                   "first": r["ts"], "last": r["ts"]})
+            s["readings"] += 1
+            s["last"] = r["ts"]
+            if r["severity"] in ("warning", "critical"):
+                s[r["severity"]] += 1
+        aw = "created_at >= %s AND created_at < %s" + (" AND asset_id = %s" if asset_id else "")
+        out = {"start": start, "end": end, "asset_id": asset_id, "truncated": truncated,
+               "summary": sorted(summary.values(), key=lambda x: (-x["critical"], -x["warning"], x["asset_id"])),
+               "alerts": db.rows(f"SELECT id, channel, recipient, severity, asset_id, subject, status, created_at, "
+                                 f"acknowledged_at FROM notifications WHERE {aw} ORDER BY created_at DESC LIMIT 500", *args),
+               "runs": db.rows(f"SELECT run_id, asset_id, status, route, priority, started_by, created_at FROM runs "
+                               f"WHERE {aw} ORDER BY created_at DESC LIMIT 200", *args),
+               "work_orders": db.rows(f"SELECT work_order, asset_id, priority, title, cmms_status, created_at FROM work_orders "
+                                      f"WHERE {aw} ORDER BY created_at DESC LIMIT 200", *args)}
+        if asset_id:
+            a = db.asset(asset_id)
+            out["readings"] = readings
+            out["thresholds"] = {m: r.model_dump() for m, r in db.category(a.category).metrics.items()}
+            out["asset"] = a.model_dump()
+        return out
 
     @app.get("/api/governance")
     def governance(_: dict = Depends(user)) -> dict:
@@ -222,6 +355,13 @@ def create_app(settings: Settings | None = None, llm: LLM | None = None, send=No
         last_scan["t"] = time.time()
         found = anomaly.scan(db, settings.now)
         return {"findings": len(found), "raised": notifier.alert(found)}
+
+    @app.post("/api/alerts/ack-all")
+    def ack_all(u: dict = Depends(need("planner"))) -> dict:
+        n = db.rows("UPDATE notifications SET acknowledged_at = now() WHERE channel = 'dashboard' "
+                    "AND acknowledged_at IS NULL RETURNING id")
+        log.info("%d alerts acknowledged by %s", len(n), u["name"])
+        return {"acknowledged": len(n)}
 
     @app.post("/api/alerts/{alert_id}/ack")
     def ack(alert_id: int, u: dict = Depends(need("planner"))) -> dict:
@@ -339,6 +479,46 @@ def create_app(settings: Settings | None = None, llm: LLM | None = None, send=No
         return db.rows("SELECT id, channel, recipient, severity, asset_id, subject, status, error, created_at, "
                        "acknowledged_at FROM notifications ORDER BY id DESC LIMIT 100")
 
+    @app.get("/api/admin/config")
+    def config_view(_: dict = Depends(need("admin"))) -> dict:
+        """What the running instance is configured with (from .env / the environment); secrets as set / not set."""
+        return {"ladder": [t.describe() for t in tiers],
+                "anthropic_api_key": "set" if settings.anthropic_configured else "not set",
+                "local_llm": settings.local_base_url or "not set",
+                "clock": "live" if settings.live else f"pinned at {settings.now}",
+                "smtp": {"host": settings.smtp_host or "not set", "user": settings.smtp_user or "not set",
+                         "password": "set" if settings.smtp_password else "not set",
+                         "from": settings.smtp_from or settings.smtp_user or "not set"},
+                "public_url": settings.public_url, "email_cooldown_min": settings.email_cooldown_min,
+                "alert_emails_from_env": [e for _, e in parse_recipients(settings.alert_emails)],
+                "trustplane": settings.trustplane_url or "not set", "deployment": settings.deployment}
+
+    @app.post("/api/admin/test-alert")
+    def test_alert(u: dict = Depends(need("admin"))) -> dict:
+        """Send a sample critical alert e-mail to every registered recipient (to see how it looks)."""
+        recips = db.rows("SELECT email FROM alert_recipients ORDER BY id")
+        if not recips:
+            raise HTTPException(409, "Register a recipient first.")
+        subject = "[CRITICAL] TEST P-101 vibration_rms = 8.4 mm/s"
+        lines = ["This is a test of the alert e-mail, sent from the Admin screen by " + u["name"] + ".",
+                 "A real alert names the asset, the reading, when it was taken and the threshold it crossed."]
+        from .notify import render_html
+        out = []
+        for r in recips:
+            status, error = "disabled", None
+            if notifier.send is not None:
+                try:
+                    notifier.send(r["email"], subject, "\n".join(lines), render_html("critical", subject, lines,
+                                                                                    settings.public_url), "critical")
+                    status = "sent"
+                except Exception as e:
+                    status, error = "failed", f"{type(e).__name__}: {e}"[:300]
+            db.exec("INSERT INTO notifications (dedupe_key, channel, recipient, severity, asset_id, subject, status, error) "
+                    "VALUES (%s, 'email', %s, 'critical', 'P-101', %s, %s, %s)", f"test:{uuid.uuid4().hex}", r["email"],
+                    subject, status, error)
+            out.append({"to": r["email"], "status": status, "error": error})
+        return {"results": out}
+
     @app.get("/api/admin/faults")
     def get_faults(_: dict = Depends(need("admin"))) -> dict:
         return faults.as_dict()
@@ -352,6 +532,8 @@ def create_app(settings: Settings | None = None, llm: LLM | None = None, send=No
         return faults.as_dict()
 
     # --- single-page app ------------------------------------------------------------------------------------------
+    if settings.brand_dir.is_dir():
+        app.mount("/branding", StaticFiles(directory=settings.brand_dir), name="branding")
     if DIST.exists():
         app.mount("/assets", StaticFiles(directory=DIST / "assets"), name="assets")
 

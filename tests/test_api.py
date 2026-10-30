@@ -138,3 +138,41 @@ def test_governance_overview_shows_the_controls_at_work(make_client):
 def test_health_reports_the_ladder(client):
     h = client.get("/health").json()
     assert h["ladder"] == [{"tier": "demo", "model": "scripted", "provider": "scripted"}] and h["demo_model"] is True
+
+
+def test_branding_is_public_and_the_logo_is_optional(make_client, settings, tmp_path):
+    from dataclasses import replace
+    c = make_client()
+    assert c.get("/api/branding").json() == {"name": "Work-order assistant", "subtitle": "Maintenance operations",
+                                             "logo": None, "deployment": "local"}
+    (tmp_path / "logo.svg").write_text("<svg xmlns='http://www.w3.org/2000/svg'/>", encoding="utf-8")
+    c2 = make_client(s=replace(settings, brand_dir=tmp_path, brand_logo="../../logo.svg", brand_name="Plant X"))
+    b = c2.get("/api/branding").json()
+    assert b["logo"] == "/branding/logo.svg" and b["name"] == "Plant X"      # path parts are dropped
+    assert c2.get("/branding/logo.svg").status_code == 200
+
+
+def test_ack_all_and_config_view(client):
+    planner, admin = auth(client, "planner"), auth(client, "admin")
+    assert client.post("/api/alerts/ack-all", headers=planner).json() == {"acknowledged": 4}
+    assert client.get("/api/dashboard", headers=planner).json()["alerts"] == []
+    cfg = client.get("/api/admin/config", headers=admin).json()
+    assert cfg["anthropic_api_key"] in ("set", "not set") and cfg["smtp"]["password"] in ("set", "not set")
+    assert "SECRET" not in str(cfg) and client.get("/api/admin/config", headers=planner).status_code == 403
+
+
+def test_test_alert_email_is_html_and_high_priority(client, mailbox):
+    admin = auth(client, "admin")
+    assert client.post("/api/admin/test-alert", headers=admin).status_code == 409          # nobody registered
+    client.post("/api/admin/recipients", headers=admin, json={"name": "Ops", "email": "ops@x.org"})
+    r = client.post("/api/admin/test-alert", headers=admin).json()["results"]
+    assert r == [{"to": "ops@x.org", "status": "sent", "error": None}]
+    m = mailbox[-1]
+    assert m["severity"] == "critical" and "CRITICAL ALERT" in m["html"] and "[CRITICAL] TEST" in m["subject"]
+
+
+def test_alert_emails_from_the_environment_are_registered(make_client, settings):
+    from dataclasses import replace
+    c = make_client(s=replace(settings, alert_emails="Ops Lead <Ops@Plant.example>, night@plant.example, not-an-email"))
+    got = c.get("/api/admin/recipients", headers=auth(c, "admin")).json()
+    assert [(r["name"], r["email"]) for r in got] == [("Ops Lead", "ops@plant.example"), ("night", "night@plant.example")]

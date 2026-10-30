@@ -8,3 +8,5 @@ test-results/
 .pytest_cache/
 frontend/node_modules/
 frontend/dist/
+branding/*
+!branding/README.md

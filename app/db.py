@@ -8,7 +8,7 @@ from __future__ import annotations
 import csv
 import json
 import logging
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 from psycopg.rows import dict_row
@@ -21,7 +21,7 @@ from .models import Asset, Category, HistoryEntry, Reading, SparePart
 log = logging.getLogger("app.db")
 SCHEMA = (Path(__file__).parent / "schema.sql").read_text(encoding="utf-8")
 TABLES = ["run_events", "work_orders", "notifications", "runs", "anomalies", "data_rejections", "telemetry",
-          "maintenance_history", "spare_parts", "alert_recipients", "assets", "machine_categories"]
+          "maintenance_history", "spare_parts", "alert_recipients", "simulator", "assets", "machine_categories"]
 
 
 class Database:
@@ -53,8 +53,9 @@ class Database:
         with self.pool.connection() as c:
             c.execute("TRUNCATE " + ", ".join(TABLES) + " RESTART IDENTITY CASCADE")
 
-    def seed(self, data_dir: Path) -> dict:
-        """Load the fixture files; returns counts. Idempotent only on an empty database (call reset first)."""
+    def seed(self, data_dir: Path, shift: timedelta = timedelta(0)) -> dict:
+        """Load the fixture files; returns counts. Idempotent only on an empty database (call reset first).
+        ``shift`` moves every timestamp and history date forward (live clock: the data ends at start-up)."""
         rejected: list[tuple[str, dict, str]] = []
 
         def parse(model, rows, source):
@@ -94,10 +95,11 @@ class Database:
                 cur.execute("INSERT INTO assets VALUES (%s,%s,%s,%s,%s,%s,%s)",
                             (a.asset_id, a.name, a.category, a.site, a.line, a.criticality, a.energy_sources))
             cur.executemany("INSERT INTO telemetry (asset_id, ts, metric, value, unit) VALUES (%s,%s,%s,%s,%s)",
-                            [(r.asset_id, r.timestamp, r.metric, r.value, r.unit) for r in readings])
+                            [(r.asset_id, r.timestamp + shift, r.metric, r.value, r.unit) for r in readings])
             for h in history:
                 cur.execute("INSERT INTO maintenance_history VALUES (%s,%s,%s,%s,%s)",
-                            (h.work_order, h.asset_id, h.date, h.summary, h.parts))
+                            (h.work_order, h.asset_id, (date.fromisoformat(h.date) + timedelta(days=shift.days)).isoformat(),
+                             h.summary, h.parts))
             for p in parts:
                 cur.execute("INSERT INTO spare_parts VALUES (%s,%s,%s,%s,%s,%s)",
                             (p.part_no, p.description, p.fits_types, p.on_hand, p.location, p.lead_time_days))

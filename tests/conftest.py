@@ -14,7 +14,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.api import create_app
-from app.config import ROOT, Settings
+from app.config import ROOT, SEED_ANCHOR, Settings
 
 ADMIN_URL = os.environ.get("TEST_ADMIN_URL", "postgresql://wo:wo-dev@127.0.0.1:5440/wo")
 TEST_URL = os.environ.get("TEST_DATABASE_URL", "postgresql://wo:wo-dev@127.0.0.1:5440/wo_test")
@@ -32,13 +32,13 @@ def _test_database():
 
 @pytest.fixture
 def settings() -> Settings:
-    return Settings(database_url=TEST_URL, data_dir=ROOT / "data", llm="scripted", users=USERS,
+    return Settings(database_url=TEST_URL, data_dir=ROOT / "data", llm="scripted", users=USERS, pinned_now=SEED_ANCHOR,
                     jwt_secret="test-secret-for-the-suite-only-0123456789")
 
 
 class Mailbox(list):
-    def __call__(self, to: str, subject: str, body: str) -> None:
-        self.append({"to": to, "subject": subject, "body": body})
+    def __call__(self, to: str, subject: str, body: str, html: str | None = None, severity: str = "warning") -> None:
+        self.append({"to": to, "subject": subject, "body": body, "html": html, "severity": severity})
 
 
 @pytest.fixture

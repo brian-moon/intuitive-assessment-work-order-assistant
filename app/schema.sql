@@ -139,3 +139,16 @@ ALTER TABLE runs ADD COLUMN IF NOT EXISTS decision text;       -- approve | reje
 ALTER TABLE runs ADD COLUMN IF NOT EXISTS wait_ms integer;     -- how long the draft waited for the planner
 -- Columns added after the first release: CREATE TABLE IF NOT EXISTS does not add them to an existing database.
 ALTER TABLE notifications ADD COLUMN IF NOT EXISTS claimed_at timestamptz NOT NULL DEFAULT now();
+
+-- Live mode: where a reading came from (seed file or the telemetry simulator), and the simulator's switch.
+ALTER TABLE telemetry ADD COLUMN IF NOT EXISTS source text NOT NULL DEFAULT 'seed';
+CREATE INDEX IF NOT EXISTS telemetry_ts ON telemetry (ts DESC);
+CREATE TABLE IF NOT EXISTS simulator (
+    id         integer PRIMARY KEY CHECK (id = 1),
+    enabled    boolean NOT NULL,
+    rate       real NOT NULL CHECK (rate > 0),
+    unit       text NOT NULL CHECK (unit IN ('minute', 'hour')),
+    mix        jsonb NOT NULL,                  -- probability of normal / warning / critical readings
+    updated_by text,
+    updated_at timestamptz NOT NULL DEFAULT now()
+);
