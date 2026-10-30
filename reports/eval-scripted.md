@@ -1,6 +1,6 @@
 # Evaluation report: scripted (1 trial(s) × 13 cases)
 
-Generated 2026-10-30T00:49:58+00:00.
+Generated 2026-10-30T02:36:28+00:00.
 
 | Criterion | Pass rate | Runs scored | Threshold |
 |---|---|---|---|
@@ -15,6 +15,6 @@ Consistency per case (trials fully passing): E01-critical-pump 1/1, E02-critical
 
 Flaky cases: none.
 
-Tokens per run: mean 0, max 0. Cost: 0.0 USD in total, 0.0 per run. Latency: 0.37 s per run.
+Tokens per run: mean 0, max 0. Cost: 0.0 USD in total, 0.0 per run. Latency: 0.29 s per run.
 
 Ladder: scripted. Final route per drafted run: demo 10, human 1. First-tier escalation rate: 0.0.

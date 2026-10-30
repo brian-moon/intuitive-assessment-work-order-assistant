@@ -38,7 +38,7 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 from app.api import create_app
-from app.config import ROOT, Settings
+from app.config import ROOT, SEED_ANCHOR, Settings
 
 HERE = Path(__file__).parent
 CRITERIA = ["task_completion", "groundedness", "relevance", "tool_accuracy", "safety", "failure_handling"]
@@ -113,7 +113,8 @@ def main() -> int:
     url = os.environ.get("EVAL_DATABASE_URL") or os.environ.get("TEST_DATABASE_URL",
                                                                  "postgresql://wo:wo-dev@127.0.0.1:5440/wo_test")
     ensure_database(url)
-    base = Settings(database_url=url,
+    # pinned clock and no simulator: every trial sees the same data, so differences come from the model alone
+    base = Settings(database_url=url, pinned_now=SEED_ANCHOR, sim_autostart=False,
                     data_dir=ROOT / "data", users=USERS, jwt_secret="eval-runner-secret-0123456789abcdef")
     settings = replace(base, llm=args.llm)
     if args.llm == "frontier" and not settings.anthropic_configured:

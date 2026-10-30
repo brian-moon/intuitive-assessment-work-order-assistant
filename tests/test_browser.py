@@ -40,7 +40,7 @@ def server():
         pytest.skip("front end not built (cd frontend && npm run build)")
     port = _free_port()
     env = {**os.environ, "DATABASE_URL": TEST_URL, "APP_DEMO_USERS": "1", "APP_LLM": "scripted",
-           "APP_RESET_ON_START": "1", "APP_JWT_SECRET": "browser-test-secret-0123456789abcdef"}
+           "APP_RESET_ON_START": "1", "SIM_AUTOSTART": "0", "APP_JWT_SECRET": "browser-test-secret-0123456789abcdef"}
     proc = subprocess.Popen([sys.executable, "-m", "uvicorn", "app.main:app", "--port", str(port)], cwd=ROOT, env=env,
                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     url = f"http://127.0.0.1:{port}"
