@@ -28,9 +28,7 @@ def sim_for(client, seed=1):
                      start_thread=False)
 
 
-def test_an_event_is_stored_scanned_and_alerted(client, mailbox):
-    admin = auth(client, "admin")
-    client.post("/api/admin/recipients", headers=admin, json={"name": "Ops", "email": "ops@x.org"})
+def test_an_event_is_stored_scanned_and_alerted(client):
     sim = sim_for(client)
     sim.update("t", mix={"normal": 0, "warning": 0, "critical": 1})
     ev = sim.emit_one()
@@ -39,7 +37,8 @@ def test_an_event_is_stored_scanned_and_alerted(client, mailbox):
     assert db.row("SELECT count(*) AS n FROM telemetry WHERE source = 'simulator'")["n"] == 1
     sev = db.row("SELECT severity FROM anomalies WHERE asset_id = %s AND metric = %s", ev["asset_id"], ev["metric"])
     assert sev["severity"] == "critical"
-    assert any(ev["asset_id"] in m["subject"] and m["severity"] == "critical" for m in mailbox)
+    shown = db.row("SELECT count(*) AS n FROM notifications WHERE channel = 'dashboard' AND asset_id = %s", ev["asset_id"])
+    assert shown["n"] >= 1
 
 
 def test_email_cooldown_limits_repeats_but_the_dashboard_records_every_alert(client, mailbox):
@@ -122,3 +121,16 @@ def test_live_streams_are_capped_per_user(client):
         t.join()
     assert sorted(results) == [200, 200, 200, 429]
     assert client.get("/api/live/stream?seconds=1", headers=planner).status_code == 200    # slots were released
+
+
+def test_simulated_readings_alert_on_the_dashboard_but_send_no_email(client, mailbox):
+    admin = auth(client, "admin")
+    client.post("/api/admin/recipients", headers=admin, json={"name": "Ops", "email": "ops@x.org"})
+    mailbox.clear()
+    sim = sim_for(client)
+    sim.update("t", mix={"normal": 0, "warning": 0, "critical": 1})
+    ev = sim.emit_one()
+    db = client.app.state.db
+    shown = db.row("SELECT count(*) AS n FROM notifications WHERE channel = 'dashboard' AND asset_id = %s "
+                   "AND created_at > now() - interval '1 minute'", ev["asset_id"])["n"]
+    assert shown >= 1 and mailbox == []

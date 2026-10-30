@@ -41,15 +41,18 @@ TOOL_SPECS: list[dict] = [
                     "quote readings exactly as get_telemetry returned them; parts must come from check_spare_parts.",
      "strict": True,
      "input_schema": _obj({
-         "asset_id": ASSET_ID,
+         "asset_id": {**ASSET_ID, "description": "The asset the planner selected (never another one)."},
          "priority": {"type": "string", "enum": ["P1", "P2", "P3", "P4"]},
-         "problem_summary": {"type": "string"},
+         "problem_summary": {"type": "string", "description": "One to three sentences, at most 600 characters."},
          "evidence": {"type": "array", "items": _obj({
              "metric": {"type": "string"}, "value": {"type": "number"}, "unit": {"type": "string"},
-             "timestamp": {"type": "string"}}, ["metric", "value", "unit", "timestamp"])},
-         "recommended_actions": {"type": "array", "items": {"type": "string"}},
-         "parts": {"type": "array", "items": _obj({"part_no": {"type": "string"}, "qty": {"type": "integer"}},
-                                                   ["part_no", "qty"])},
+             "timestamp": {"type": "string", "description": "Copied exactly from get_telemetry, ISO 8601 such as "
+                                                            "2026-10-29T10:00:00Z."}},
+             ["metric", "value", "unit", "timestamp"])},
+         "recommended_actions": {"type": "array", "items": {"type": "string"}, "description": "One to eight actions."},
+         "parts": {"type": "array", "description": "Only parts check_spare_parts returned with stock on hand; empty "
+                                                   "if check_spare_parts failed.",
+                   "items": _obj({"part_no": {"type": "string"}, "qty": {"type": "integer"}}, ["part_no", "qty"])},
          "safety": _obj({"lockout_tagout_required": {"type": "boolean"},
                          "energy_sources": {"type": "array", "items": {"type": "string", "enum": [
                              "electrical", "hydraulic", "pneumatic", "mechanical", "thermal"]}},

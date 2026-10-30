@@ -21,7 +21,7 @@ def classify_asset(db: Database, asset_id: str, now: datetime) -> list[dict]:
         rule = cat.metrics.get(metric)
         severity = rule.severity(r["value"]) if rule else "normal"
         out.append({"asset_id": asset_id, "metric": metric, "severity": severity, "value": r["value"], "unit": r["unit"],
-                    "ts": r["ts"], "threshold": rule.threshold_for(severity) if rule else None,
+                    "ts": r["ts"], "source": r.get("source", "seed"), "threshold": rule.threshold_for(severity) if rule else None,
                     "warning": rule.warning if rule else None, "critical": rule.critical if rule else None,
                     "direction": rule.direction if rule else None, "stale": stale})
     return out

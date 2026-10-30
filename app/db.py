@@ -130,7 +130,7 @@ class Database:
         return [r["asset_id"] for r in self.rows("SELECT asset_id FROM assets ORDER BY asset_id")]
 
     def latest_readings(self, asset_id: str) -> dict[str, dict]:
-        rows = self.rows("SELECT DISTINCT ON (metric) metric, value, unit, ts FROM telemetry WHERE asset_id = %s "
+        rows = self.rows("SELECT DISTINCT ON (metric) metric, value, unit, ts, source FROM telemetry WHERE asset_id = %s "
                          "ORDER BY metric, ts DESC", asset_id)
         return {r["metric"]: r for r in rows}
 

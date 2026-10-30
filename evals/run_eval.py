@@ -42,7 +42,7 @@ from app.config import ROOT, Settings
 
 HERE = Path(__file__).parent
 CRITERIA = ["task_completion", "groundedness", "relevance", "tool_accuracy", "safety", "failure_handling"]
-GROUNDING = {"ungrounded_evidence", "unknown_part", "wrong_asset", "unknown_asset"}
+GROUNDING = {"ungrounded_evidence", "unknown_part", "unknown_asset"}   # wrong_asset is scored under relevance
 USERS = {"eval": ("eval-runner-password", "admin")}
 
 

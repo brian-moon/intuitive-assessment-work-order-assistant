@@ -5,7 +5,8 @@
   (Gmail with an app password in the demo). Without SMTP settings the channel is recorded as ``disabled``.
   Critical mail is HTML with a red banner and high-importance headers, so it stands out in the inbox. A recipient
   gets one e-mail per asset, metric and severity within the cooldown (live telemetry repeats); the dashboard still
-  records every alert.
+  records every alert. Readings from the telemetry simulator alert on the dashboard only, never by e-mail: a demo
+  generator must not fill real inboxes.
 
 Every attempt is written to ``notifications`` with its delivery status, and a dedupe key makes the same finding alert
 only once however often the scan runs. The e-mail carries the finding and a link, never an approval action:
@@ -98,7 +99,7 @@ class Notifier:
             if f["severity"] == "critical" and self._claim(key, "dashboard", "", f, subject, "shown"):
                 raised.append({"channel": "dashboard", "subject": subject})
             for r in recipients:
-                if ORDER[f["severity"]] < ORDER[r["min_severity"]]:
+                if ORDER[f["severity"]] < ORDER[r["min_severity"]] or f.get("source") == "simulator":
                     continue
                 lines = [f"Asset {f['asset_id']}: {f['metric']} reads {f['value']:g} {f['unit']} at "
                          f"{f['ts']:%Y-%m-%d %H:%M} UTC (threshold {f['threshold']:g}).",

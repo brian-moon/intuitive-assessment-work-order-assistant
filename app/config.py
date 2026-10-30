@@ -67,7 +67,7 @@ class Settings:
     trustplane_token: str = field(default_factory=lambda: os.environ.get("TRUSTPLANE_TOKEN", ""))
     trustplane_producer: str = field(default_factory=lambda: os.environ.get("TRUSTPLANE_PRODUCER", "workorder-assistant"))
     max_agent_steps: int = 6
-    max_output_tokens: int = 1500
+    max_output_tokens: int = 4096   # a draft is ~1.5k tokens; a lower cap truncated tool input mid-call
     cmms_timeout_s: float = 2.0
     users: dict[str, tuple[str, str]] = field(default_factory=_users)
     # Signs sign-in tokens. Unset: generated once and kept in the database, so a restart does not sign everyone out.
