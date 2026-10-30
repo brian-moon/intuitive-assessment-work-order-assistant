@@ -27,13 +27,15 @@ from .cmms import MockCMMS
 from .config import Settings
 from .db import Database
 from .faults import Faults
-from .llm import LLM, make_llm
+from .llm import LLM, Tier, make_tiers
 from .models import Decision, Login, Recipient, RunRequest
 from .notify import Notifier, smtp_sender
 from .observability import finished_spans, setup
 from .pipeline import Pipeline
 from .reconcile import has_blocking
+from .routing import Policy
 from .tools import Toolbox
+from .trustplane import GovernanceSink
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 log = logging.getLogger("app.api")
@@ -41,7 +43,10 @@ DIST = Path(__file__).resolve().parent.parent / "frontend" / "dist"
 RANKS = {"viewer": 0, "planner": 1, "admin": 2}
 
 
-def create_app(settings: Settings | None = None, llm: LLM | None = None, send=None, reset: bool = False) -> FastAPI:
+def create_app(settings: Settings | None = None, llm: LLM | None = None, send=None, reset: bool = False,
+               tiers: list[Tier] | None = None, gov: GovernanceSink | None = None) -> FastAPI:
+    """``llm`` injects one model as the only tier, ``tiers`` a whole ladder (tests); otherwise the ladder comes from
+    the environment (llm.make_tiers)."""
     settings = settings or Settings()
     db = Database(settings.database_url)
     db.init_schema()
@@ -58,15 +63,21 @@ def create_app(settings: Settings | None = None, llm: LLM | None = None, send=No
                                 kwargs={"autocommit": True, "prepare_threshold": 0, "row_factory": dict_row})
     saver = PostgresSaver(saver_pool)
     saver.setup()
-    llm = llm or make_llm(settings.llm, settings.model, settings.max_output_tokens)
-    pipeline = Pipeline(db, llm, Toolbox(db, faults, settings.now), notifier, MockCMMS(faults, settings.cmms_timeout_s),
-                        settings, saver, setup())
+    tiers = tiers or ([Tier("model", llm)] if llm else make_tiers(settings))
+    policy = Policy.load(settings.routing_file)
+    gov = gov or GovernanceSink(settings.trustplane_url, settings.trustplane_token, settings.trustplane_producer,
+                                settings.deployment)
+    tracer = setup(settings.trustplane_url, settings.trustplane_token, settings.deployment)
+    pipeline = Pipeline(db, tiers, Toolbox(db, faults, settings.now), notifier, MockCMMS(faults, settings.cmms_timeout_s),
+                        settings, saver, tracer, policy, gov)
+    log.info("model ladder: %s -> planner", " -> ".join(f"{t.name}:{t.llm.model}" for t in tiers))
 
     app = FastAPI(title="Maintenance work-order assistant", version="0.2.0")
     app.state.settings, app.state.db, app.state.faults, app.state.pipeline = settings, db, faults, pipeline
-    app.state.notifier = notifier
+    app.state.notifier, app.state.tiers, app.state.policy, app.state.gov = notifier, tiers, policy, gov
 
     def close() -> None:   # release both connection pools (tests create many apps; a server process exits instead)
+        gov.close()
         saver_pool.close()
         db.close()
     app.state.close = close
@@ -104,7 +115,9 @@ def create_app(settings: Settings | None = None, llm: LLM | None = None, send=No
 
     @app.get("/health")
     def health() -> dict:
-        return {"ok": True, "llm": llm.model, "email": "enabled" if notifier.send is not None else "disabled"}
+        return {"ok": True, "ladder": [t.describe() for t in tiers],
+                "demo_model": [t.name for t in tiers] == ["demo"],
+                "email": "enabled" if notifier.send is not None else "disabled", "trustplane": gov.enabled}
 
     # --- dashboard ------------------------------------------------------------------------------------------------
     @app.get("/api/dashboard")
@@ -130,6 +143,71 @@ def create_app(settings: Settings | None = None, llm: LLM | None = None, send=No
         return {"assets": assets, "alerts": alerts, "pending_approvals": pending, "work_orders": orders,
                 "rejected_rows": db.rows("SELECT source, asset_id, reason FROM data_rejections ORDER BY id"),
                 "email": "enabled" if notifier.send is not None else "disabled"}
+
+    @app.get("/api/governance")
+    def governance(_: dict = Depends(user)) -> dict:
+        """One screen of evidence that the controls work: the ladder and its thresholds, where drafts ended up and
+        why, what the guardrails stopped, what the planners decided, alert delivery, cost by tier, the latest
+        evaluation, and whether telemetry reaches TrustPlane."""
+        runs_ = db.rows("SELECT run_id, asset_id, status, route, confidence, attempts, usage, decision, wait_ms, "
+                        "priority, created_at FROM runs ORDER BY created_at DESC")
+        by_route: dict[str, int] = {}
+        escalations: dict[str, int] = {}
+        cost: dict[str, dict] = {}
+        for r in runs_:
+            key = r["route"] or ("refused" if r["status"] == "refused" else r["status"])
+            by_route[key] = by_route.get(key, 0) + 1
+            for a in r["attempts"] or []:
+                if a["action"] in ("escalate", "human"):
+                    label = f"{a['tier']}: " + (", ".join(a["issues"]) or a["outcome"].replace("_", " "))
+                    escalations[label] = escalations.get(label, 0) + 1
+            for t, u in ((r["usage"] or {}).get("by_tier") or {}).items():
+                c = cost.setdefault(t, {"calls": 0, "input_tokens": 0, "output_tokens": 0, "cost_usd": 0.0})
+                for k in c:
+                    c[k] = round(c[k] + (u.get(k) or 0), 6)
+        frontier_runs = [r for r in runs_ if r["route"] == "frontier" and (r["usage"] or {}).get("by_tier", {}).get("frontier")]
+        per_frontier = (sum(r["usage"]["by_tier"]["frontier"]["cost_usd"] for r in frontier_runs) / len(frontier_runs)
+                        if frontier_runs else None)
+        local_ok = by_route.get("local", 0)
+        blocked = db.rows("""SELECT i->>'code' AS code, count(*) AS n FROM run_events e,
+                             jsonb_array_elements(e.event->'data'->'issues') i
+                             WHERE e.event->>'phase' = 'reconcile' AND i->>'severity' = 'blocking'
+                             GROUP BY 1 ORDER BY 2 DESC""")
+        decisions = db.row("""SELECT count(*) FILTER (WHERE decision = 'approve') AS approved,
+                              count(*) FILTER (WHERE decision = 'correct') AS corrected,
+                              count(*) FILTER (WHERE decision = 'reject') AS rejected,
+                              count(*) FILTER (WHERE status = 'awaiting_approval') AS pending,
+                              percentile_cont(0.5) WITHIN GROUP (ORDER BY wait_ms) AS median_wait_ms FROM runs""")
+        alerts = {r["status"]: r["n"] for r in db.rows(
+            "SELECT status, count(*) AS n FROM notifications WHERE channel = 'email' GROUP BY status")}
+        alerts["open_on_dashboard"] = db.row("SELECT count(*) AS n FROM notifications WHERE channel = 'dashboard' "
+                                             "AND acknowledged_at IS NULL")["n"]
+        evals = []
+        for f in sorted((settings.data_dir.parent / "reports").glob("eval-*.json")):
+            try:
+                e = json.loads(f.read_text(encoding="utf-8"))
+                evals.append({"file": f.name, "model": e["model"], "llm": e["llm"], "trials": e["trials"],
+                              "cases": e["cases"], "generated_at": e["generated_at"], "criteria": e["criteria"],
+                              "flaky_cases": e["flaky_cases"], "cost_usd": e["cost_usd"],
+                              "routes": e.get("routes")})
+            except (OSError, ValueError, KeyError):
+                continue
+        recent = [{k: r[k] for k in ("run_id", "asset_id", "status", "route", "confidence", "decision", "priority",
+                                     "created_at")} | {"attempts": [{k: a.get(k) for k in
+                                     ("tier", "model", "outcome", "confidence", "threshold", "action", "reason")}
+                                     for a in r["attempts"] or []]} for r in runs_[:12]]
+        return {
+            "ladder": [{**t.describe(), "threshold": policy.accept.get(t.name, policy.accept.get("model")),
+                        "by_priority": policy.by_priority.get(t.name, {})} for t in tiers],
+            "policy": policy.as_dict(), "demo_model": [t.name for t in tiers] == ["demo"],
+            "runs": {"total": len(runs_), "by_route": by_route}, "escalations": escalations,
+            "guardrails": {"refused_requests": by_route.get("refused", 0), "blocking_issues": blocked},
+            "hitl": decisions, "alerts": alerts,
+            "cost": {"by_tier": cost, "frontier_cost_per_run_usd": per_frontier,
+                     "estimated_frontier_cost_avoided_usd": round(per_frontier * local_ok, 6) if per_frontier else None},
+            "evals": evals, "telemetry": {**gov.status(), "otlp": bool(settings.trustplane_url and settings.trustplane_token)},
+            "recent": recent,
+        }
 
     @app.get("/api/categories")
     def categories(_: dict = Depends(user)) -> list[dict]:

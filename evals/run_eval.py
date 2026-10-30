@@ -17,7 +17,11 @@ minimum pass rates: the run exits non-zero below them, which is how the nightly 
 regression.
 
     python -m evals.run_eval --llm scripted --trials 1          # harness check, no tokens (CI)
-    python -m evals.run_eval --llm anthropic --trials 3         # Claude Haiku 5.5, needs ANTHROPIC_API_KEY
+    python -m evals.run_eval --llm frontier --trials 3          # Claude Haiku 5.5 only, needs ANTHROPIC_API_KEY
+    python -m evals.run_eval --llm auto --trials 3              # the ladder as configured: LOCAL_LLM_* (Qwen) -> Claude
+
+With the ladder, the report also says where each run ended (local / frontier / planner) and how often the local
+model had to be escalated. ``--trustplane`` sends the run and every case to TrustPlane as eval.run / eval.case.
 """
 from __future__ import annotations
 
@@ -89,7 +93,8 @@ def score(case: dict, evs: list[dict], energy: set[str], max_steps: int) -> dict
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--llm", choices=["scripted", "anthropic"], default="scripted")
+    ap.add_argument("--llm", choices=["scripted", "frontier", "auto"], default="scripted")
+    ap.add_argument("--trustplane", action="store_true", help="send eval.run / eval.case to TrustPlane")
     ap.add_argument("--trials", type=int, default=1)
     ap.add_argument("--out", default=str(ROOT / "reports"))
     args = ap.parse_args()
@@ -97,7 +102,15 @@ def main() -> int:
     base = Settings(database_url=os.environ.get("TEST_DATABASE_URL", "postgresql://wo:wo-dev@127.0.0.1:5440/wo_test"),
                     data_dir=ROOT / "data", users=USERS, jwt_secret="eval-runner-secret-0123456789abcdef")
     settings = replace(base, llm=args.llm)
+    if args.llm == "frontier" and not settings.anthropic_configured:
+        print("--llm frontier needs ANTHROPIC_API_KEY (your own key; none ships with the repo).", file=sys.stderr)
+        return 2
+    if args.llm == "auto" and not (settings.anthropic_configured or settings.local_base_url):
+        print("--llm auto needs LOCAL_LLM_BASE_URL and/or ANTHROPIC_API_KEY; use --llm scripted for a harness check.",
+              file=sys.stderr)
+        return 2
     app = create_app(settings, send=lambda *a: None, reset=True)
+    ladder = app.state.tiers
     client = TestClient(app)
     token = client.post("/api/login", json={"username": "eval", "password": USERS["eval"][0]}).json()["token"]
     headers = {"Authorization": f"Bearer {token}"}
@@ -117,10 +130,22 @@ def main() -> int:
             run_id = evs[-1].get("run_id") if evs else None
             usage = (db.row("SELECT usage FROM runs WHERE run_id = %s", run_id) or {}).get("usage", {}) if run_id else {}
             r = score(case, evs, energy, settings.max_agent_steps)
+            row = db.row("SELECT route, attempts FROM runs WHERE run_id = %s", run_id) if run_id else None
+            r["route"] = (row or {}).get("route")
+            r["path"] = [f"{a['tier']}:{a['action']}" for a in (row or {}).get("attempts") or []]
             results.append({"case": case["id"], "trial": trial, "seconds": round(time.time() - t0, 2), "usage": usage, **r})
             print(f"{case['id']:30} trial {trial}: {r['outcome']:17} "
                   + " ".join(f"{c[:5]}={'-' if v is None else int(v)}" for c, v in r["scores"].items()), flush=True)
     app.state.close()
+
+    drafted = [r for r in results if r["path"]]
+    by_route: dict[str, int] = {}
+    for r in drafted:
+        by_route[r["route"] or "none"] = by_route.get(r["route"] or "none", 0) + 1
+    first = ladder[0].name
+    escalated = sum(1 for r in drafted if r["path"][0] == f"{first}:escalate")
+    routes = {"ladder": [t.describe() for t in ladder], "by_route": by_route,
+              "first_tier_escalation_rate": round(escalated / len(drafted), 3) if drafted else None}
 
     thresholds = json.loads((HERE / "thresholds.json").read_text(encoding="utf-8"))
     summary = {}
@@ -136,7 +161,7 @@ def main() -> int:
     cost = [r["usage"].get("cost_usd", 0.0) for r in results]
     report = {
         "generated_at": datetime.now(UTC).isoformat(timespec="seconds"), "llm": args.llm,
-        "model": settings.model if args.llm == "anthropic" else "scripted", "trials": args.trials,
+        "model": " -> ".join(t.llm.model for t in ladder), "trials": args.trials, "routes": routes,
         "cases": len(per_case), "criteria": summary,
         "consistency": {c: f"{sum(v)}/{len(v)}" for c, v in per_case.items()}, "flaky_cases": flaky,
         "tokens_per_run": {"mean": round(statistics.mean(tokens), 1), "max": max(tokens)},
@@ -159,13 +184,43 @@ def main() -> int:
               f"Tokens per run: mean {report['tokens_per_run']['mean']}, max {report['tokens_per_run']['max']}. "
               f"Cost: {report['cost_usd']['total']} USD in total, {report['cost_usd']['per_run']} per run. "
               f"Latency: {report['seconds_per_run']} s per run."]
+    lines += ["", f"Ladder: {report['model']}. Final route per drafted run: "
+              + ", ".join(f"{k} {v}" for k, v in by_route.items())
+              + f". First-tier escalation rate: {routes['first_tier_escalation_rate']}."]
     (out / f"{stem}.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    if args.trustplane:
+        send_to_trustplane(settings, report, thresholds)
     print("\n".join(lines))
     below = [c for c, v in summary.items() if v["pass_rate"] is not None and v["pass_rate"] < v["threshold"]]
     if below:
         print(f"\nBELOW THRESHOLD: {', '.join(below)}", file=sys.stderr)
         return 1
     return 0
+
+
+def send_to_trustplane(settings, report: dict, thresholds: dict) -> None:
+    from app.trustplane import GovernanceSink
+
+    sink = GovernanceSink(settings.trustplane_url, settings.trustplane_token, settings.trustplane_producer,
+                          settings.deployment)
+    if not sink.enabled:
+        print("TRUSTPLANE_URL / TRUSTPLANE_TOKEN not set; nothing sent.", file=sys.stderr)
+        return
+    run_id = f"workorder-eval-{report['llm']}-{report['generated_at']}"
+    below = [c for c, v in report["criteria"].items() if v["pass_rate"] is not None and v["pass_rate"] < v["threshold"]]
+    passed = sum(1 for r in report["runs"] if all(v is not False for v in r["scores"].values()))
+    sink.emit("eval.run", run_id, {"eval.suite": "workorder-agent", "eval.version": report["model"],
+                                   "eval.cases_total": len(report["runs"]), "eval.cases_passed": passed,
+                                   "eval.gate": "blocked" if below else "passed", "eval.run_id": run_id,
+                                   "eval.metrics": {c: v["pass_rate"] for c, v in report["criteria"].items()}
+                                   | {"cost_usd_total": report["cost_usd"]["total"], "routes": report["routes"]}})
+    for r in report["runs"]:
+        failed = [c for c, v in r["scores"].items() if v is False]
+        sink.emit("eval.case", run_id, {"eval.run_id": run_id, "eval.case_id": f"{r['case']}#{r['trial']}",
+                                        "eval.passed": not failed, **({"eval.failure_kind": ",".join(failed)} if failed else {}),
+                                        "eval.actual_ref": f"route={r.get('route')} path={'>'.join(r.get('path') or [])}"})
+    sink.close()
+    print(f"TrustPlane: {sink.status()['sent']} events sent, {sink.status()['dropped']} dropped.")
 
 
 if __name__ == "__main__":

@@ -1,7 +1,7 @@
 """Browser test: the critical user workflow, end to end in Chromium against the real server and the built React app.
 
 sign in → the critical banner shows → run the pipeline for the pump in alarm → phases stream in → the draft appears →
-approve → the work-order document appears.
+approve → the work-order document appears → the governance screen shows the routing decision.
 
 Needs the built front end (``cd frontend && npm run build``) and Chromium (``playwright install chromium``).
 Run with ``pytest -m browser``; screenshots go to ``reports/``.
@@ -83,3 +83,9 @@ def test_planner_turns_an_alarm_into_a_work_order(server, page):
     assert "Work order WO-" in doc and "vibration_rms" in doc and "Lockout/tagout: required" in doc
     expect(page.get_by_test_id("run-status")).to_have_text("created")   # the last event of the stream
     page.screenshot(path=str(REPORTS / "3-work-order.png"), full_page=True)
+
+    page.get_by_test_id("tab-governance").click()
+    expect(page.get_by_test_id("recent-routes")).to_contain_text("P-101")
+    expect(page.get_by_test_id("ladder")).to_contain_text("Planner")
+    expect(page.get_by_test_id("eval-table")).to_contain_text("groundedness")
+    page.screenshot(path=str(REPORTS / "4-governance.png"), full_page=True)

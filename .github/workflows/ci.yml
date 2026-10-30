@@ -80,9 +80,9 @@ jobs:
       - uses: actions/setup-python@v5
         with: {python-version: "3.11", cache: pip, cache-dependency-path: requirements*.txt}
       - run: pip install -r requirements-dev.txt
-      - run: python -m evals.run_eval --llm anthropic --trials 3
+      - run: python -m evals.run_eval --llm frontier --trials 3
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
       - uses: actions/upload-artifact@v4
         if: always()
-        with: {name: eval-live, path: reports/eval-anthropic.*}
+        with: {name: eval-live, path: reports/eval-frontier.*}

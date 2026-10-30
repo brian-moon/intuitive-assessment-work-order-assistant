@@ -5,8 +5,9 @@ import Login from './Login'
 import Dashboard from './Dashboard'
 import RunPanel from './RunPanel'
 import Admin from './Admin'
+import Governance from './Governance'
 
-type Tab = 'dashboard' | 'run' | 'admin'
+type Tab = 'dashboard' | 'run' | 'governance' | 'admin'
 
 export default function App() {
   const [session, setSession] = useState<Session | null>(loadSession())
@@ -37,6 +38,7 @@ export default function App() {
         <nav>
           <button className={tab === 'dashboard' ? 'on' : ''} onClick={() => setTab('dashboard')}>Dashboard</button>
           <button className={tab === 'run' ? 'on' : ''} onClick={() => setTab('run')}>Run</button>
+          <button className={tab === 'governance' ? 'on' : ''} onClick={() => setTab('governance')} data-testid="tab-governance">Governance</button>
           {session.role === 'admin' && <button className={tab === 'admin' ? 'on' : ''} onClick={() => setTab('admin')}>Admin</button>}
         </nav>
         <div className="who">{session.user} · {session.role} <button className="link" onClick={signOut}>Sign out</button></div>
@@ -52,6 +54,7 @@ export default function App() {
       <main>
         {tab === 'dashboard' && <Dashboard data={data} session={session} onRefresh={refresh} onOpen={open} />}
         {tab === 'run' && <RunPanel session={session} assets={data?.assets ?? []} target={runTarget} onChanged={refresh} />}
+        {tab === 'governance' && <Governance session={session} />}
         {tab === 'admin' && session.role === 'admin' && <Admin session={session} />}
       </main>
     </div>

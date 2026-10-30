@@ -2,11 +2,11 @@ import { useEffect, useState } from 'react'
 import { api, stream } from './api'
 import type { AssetRow, Draft, Issue, PhaseEvent, Session } from './types'
 
-const PHASES = ['guard', 'load_asset', 'data_quality', 'detect_anomalies', 'alert', 'agent_draft', 'reconcile', 'approval',
-                'generate', 'export'] as const
+const PHASES = ['guard', 'load_asset', 'data_quality', 'detect_anomalies', 'alert', 'agent_draft', 'reconcile', 'route',
+                'approval', 'generate', 'export'] as const
 const LABEL: Record<string, string> = {
   guard: 'Safety check', load_asset: 'Asset and category rules', data_quality: 'Data quality', detect_anomalies: 'Anomalies',
-  alert: 'Alerts', agent_draft: 'Agent draft', reconcile: 'Reconciliation', approval: 'Planner approval',
+  alert: 'Alerts', agent_draft: 'Agent draft', reconcile: 'Reconciliation', route: 'Model routing', approval: 'Planner approval',
   generate: 'Work order', export: 'CMMS export',
 }
 const ICON: Record<string, string> = { running: '…', done: '✓', warning: '!', critical: '!', failed: '✕', skipped: '–', waiting: '⏸' }
@@ -64,6 +64,8 @@ export default function RunPanel({ session, assets, target, onChanged }: {
   const canApprove = status === 'awaiting_approval' && Boolean(waiting?.data?.can_approve)
   const document = (events.find((e) => e.phase === 'generate' && e.data?.document_md)?.data?.document_md as string | undefined)
   const toolSteps = events.filter((e) => e.phase === 'agent_draft' && e.data?.tool)
+  const routeSteps = events.filter((e) => e.phase === 'route')
+  const route = waiting?.data?.route as string | undefined
 
   return (
     <div className="grid run">
@@ -89,7 +91,9 @@ export default function RunPanel({ session, assets, target, onChanged }: {
                 <span className="icon">{e ? ICON[e.status] ?? '•' : '○'}</span>
                 <div><strong>{LABEL[p]}</strong><div className="muted">{e?.detail ?? ''}</div>
                   {p === 'agent_draft' && toolSteps.length > 0 && (
-                    <ul className="tools">{toolSteps.map((t, i) => <li key={i} className={t.data?.is_error ? 'bad' : ''}>{String(t.data?.tool)}{t.data?.is_error ? ' (error)' : ''}</li>)}</ul>)}
+                    <ul className="tools">{toolSteps.map((t, i) => <li key={i} className={t.data?.is_error ? 'bad' : ''}>{String(t.data?.tier ?? '')} {String(t.data?.tool)}{t.data?.is_error ? ' (error)' : ''}</li>)}</ul>)}
+                  {p === 'route' && routeSteps.length > 1 && (
+                    <ul className="tools">{routeSteps.map((t, i) => <li key={i}>{t.detail}</li>)}</ul>)}
                 </div>
               </li>)
           })}
@@ -98,7 +102,9 @@ export default function RunPanel({ session, assets, target, onChanged }: {
 
       {draft && (
         <section className="card wide" data-testid="draft">
-          <div className="head"><h2>Draft for {draft.asset_id}</h2><span className={`chip ${draft.priority === 'P1' ? 'critical' : 'warning'}`} data-testid="priority">{draft.priority}</span></div>
+          <div className="head"><h2>Draft for {draft.asset_id}</h2><span>{route && <span className={`chip ${route === 'human' ? 'critical' : 'normal'}`} data-testid="route">{route === 'human' ? 'planner review' : `${route} model`}</span>}
+            <span className={`chip ${draft.priority === 'P1' ? 'critical' : 'warning'}`} data-testid="priority">{draft.priority}</span></span></div>
+          {route === 'human' && <div className="issue blocking">No model reached its confidence threshold: check every field before approving.</div>}
           <p>{draft.problem_summary}</p>
           <table><thead><tr><th>Evidence</th><th>Value</th><th>Recorded</th></tr></thead>
             <tbody>{draft.evidence.map((ev) => <tr key={ev.metric + ev.timestamp}><td>{ev.metric}</td><td>{ev.value} {ev.unit}</td><td className="muted">{ev.timestamp}</td></tr>)}</tbody></table>

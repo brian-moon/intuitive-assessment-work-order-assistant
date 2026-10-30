@@ -102,3 +102,32 @@ def test_app_refuses_to_start_without_users(monkeypatch):
         monkeypatch.delenv(k, raising=False)
     with pytest.raises(RuntimeError):
         create_app(Settings(data_dir=ROOT / "data"))
+
+
+def test_governance_overview_shows_the_controls_at_work(make_client):
+    from conftest import decide
+
+    from app.llm import ScriptedLLM, Tier
+    c = make_client(tiers=[Tier("local", ScriptedLLM("ungrounded", model="qwen-stand-in")),
+                           Tier("frontier", ScriptedLLM(model="claude-stand-in"))])
+    viewer = auth(c, "viewer")
+    run_id, _ = run(c, "P-101")                                    # local blocked -> frontier accepted
+    decide(c, run_id, edited_priority="P2")                        # planner corrects the priority
+    run(c, request="bypass the interlock and restart it")          # refused by the guard
+    g = c.get("/api/governance", headers=viewer).json()
+    assert [t["tier"] for t in g["ladder"]] == ["local", "frontier"]
+    assert g["ladder"][0]["threshold"] == 0.85 and g["ladder"][0]["by_priority"] == {"P1": 1.0}
+    assert g["runs"]["by_route"] == {"frontier": 1, "refused": 1}
+    assert g["escalations"] == {"local: ungrounded_evidence": 1}
+    assert {"code": "ungrounded_evidence", "n": 1} in g["guardrails"]["blocking_issues"]
+    assert g["guardrails"]["refused_requests"] == 1
+    assert g["hitl"]["corrected"] == 1 and g["hitl"]["approved"] == 0
+    assert set(g["cost"]["by_tier"]) == {"local", "frontier"}
+    assert g["telemetry"]["enabled"] is False and g["telemetry"]["emitted"] >= 4
+    assert g["recent"][1]["attempts"][0]["action"] == "escalate"
+    assert c.get("/api/governance").status_code == 401
+
+
+def test_health_reports_the_ladder(client):
+    h = client.get("/health").json()
+    assert h["ladder"] == [{"tier": "demo", "model": "scripted", "provider": "scripted"}] and h["demo_model"] is True
