@@ -11,7 +11,7 @@ markers = [
   "browser: Playwright browser test (needs a running server and Chromium)",
   "live: calls the real model; costs tokens",
 ]
-addopts = "-m 'not live'"
+addopts = "-m 'not live and not browser'"
 
 [tool.pyright]
 venvPath = "."
