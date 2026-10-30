@@ -339,6 +339,10 @@ def create_app(settings: Settings | None = None, llm: LLM | None = None, send=No
         return db.rows("SELECT id, channel, recipient, severity, asset_id, subject, status, error, created_at, "
                        "acknowledged_at FROM notifications ORDER BY id DESC LIMIT 100")
 
+    @app.get("/api/admin/faults")
+    def get_faults(_: dict = Depends(need("admin"))) -> dict:
+        return faults.as_dict()
+
     @app.put("/api/admin/faults")
     def set_faults(body: dict, _: dict = Depends(need("admin"))) -> dict:
         for k, v in body.items():

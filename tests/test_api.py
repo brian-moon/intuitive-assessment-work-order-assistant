@@ -97,6 +97,13 @@ def test_unknown_fault_is_422(client):
     assert client.put("/api/admin/faults", headers=auth(client, "admin"), json={"storm": True}).status_code == 422
 
 
+def test_faults_can_be_read_and_switched_by_an_admin(client):
+    admin = auth(client, "admin")
+    assert client.get("/api/admin/faults", headers=admin).json()["cmms_timeout"] is False
+    assert client.put("/api/admin/faults", headers=admin, json={"cmms_timeout": True}).json()["cmms_timeout"] is True
+    assert client.get("/api/admin/faults", headers=auth(client, "planner")).status_code == 403
+
+
 def test_app_refuses_to_start_without_users(monkeypatch):
     for k in ("APP_DEMO_USERS", "APP_USERS"):
         monkeypatch.delenv(k, raising=False)

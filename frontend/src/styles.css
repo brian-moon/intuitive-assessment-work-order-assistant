@@ -80,3 +80,5 @@ th, td { text-align: left; padding: 6px 4px; border-bottom: 1px solid var(--line
 .bar-fill.warning { background: var(--warning); }
 .bar-fill.critical { background: var(--critical); }
 .bar-n { text-align: right; }
+label.toggle { width: auto; display: inline-flex; gap: 6px; align-items: center; color: var(--ink); font-size: 14px; }
+label.toggle input { width: auto; margin: 0; }
