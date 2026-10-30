@@ -271,19 +271,24 @@ class Pipeline:
         span = self.tracer.start_span(root, attributes={"run.id": run_id})
         self._run_ctx[run_id] = trace.set_span_in_context(span)
         self.db.exec("UPDATE runs SET trace_id = coalesce(trace_id, %s) WHERE run_id = %s", trace_id_hex(span), run_id)
+        status, v = "failed", {}
         try:
             for ev in self.graph.stream(payload, cfg, stream_mode="custom"):
                 yield ev
         finally:
+            # Always record where the run really is, also when the stream breaks (client gone, error): a run that was
+            # claimed for a decision returns to awaiting_approval instead of staying stuck in "deciding".
             span.end()
             self._run_ctx.pop(run_id, None)
-        snap = self.graph.get_state(cfg)
-        v = snap.values
-        waiting = bool(snap.next) and snap.next[0] == "approval"
-        status = "awaiting_approval" if waiting else v.get("status", "failed")
-        self.db.exec("UPDATE runs SET status = %s, priority = %s, reason = %s, usage = %s, updated_at = now() "
-                     "WHERE run_id = %s", status, (v.get("draft") or {}).get("priority"), v.get("reason", ""),
-                     Jsonb(v.get("usage", {})), run_id)
+            snap = self.graph.get_state(cfg)
+            v = snap.values or {}
+            waiting = bool(snap.next) and snap.next[0] == "approval"
+            status = "awaiting_approval" if waiting else v.get("status", "failed")
+            if status == "deciding":
+                status = "awaiting_approval"
+            self.db.exec("UPDATE runs SET status = %s, priority = %s, reason = %s, usage = %s, updated_at = now() "
+                         "WHERE run_id = %s", status, (v.get("draft") or {}).get("priority"), v.get("reason", ""),
+                         Jsonb(v.get("usage", {})), run_id)
         yield {"phase": "run", "status": status, "label": "Run status", "detail": v.get("reason", ""), "run_id": run_id}
 
     def start(self, run_id: str, asset_id: str, request: str, user: str) -> Iterator[dict]:

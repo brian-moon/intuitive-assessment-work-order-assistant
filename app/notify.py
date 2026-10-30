@@ -43,11 +43,16 @@ class Notifier:
         self.db, self.faults, self.public_url, self.send = db, faults, public_url, send
 
     def _claim(self, key, channel, recipient, f, subject, status) -> int | None:
-        """Insert the notification row first; only the caller that inserted it may deliver. Concurrent scans of the
-        same finding therefore send at most one e-mail per recipient."""
-        r = self.db.row("INSERT INTO notifications (dedupe_key, channel, recipient, severity, asset_id, subject, status) "
-                        "VALUES (%s,%s,%s,%s,%s,%s,%s) ON CONFLICT (dedupe_key, channel, recipient) DO NOTHING RETURNING id",
-                        key, channel, recipient, f["severity"], f["asset_id"], subject, status)
+        """Claim the notification row before delivering; only the caller that gets the row may deliver, so concurrent
+        scans send at most one e-mail per recipient. A delivery that failed, or a claim older than 10 minutes (a
+        crashed sender), can be claimed again by a later scan, so an alert is never lost to one bad attempt."""
+        r = self.db.row(
+            "INSERT INTO notifications (dedupe_key, channel, recipient, severity, asset_id, subject, status) "
+            "VALUES (%s,%s,%s,%s,%s,%s,%s) ON CONFLICT (dedupe_key, channel, recipient) DO UPDATE "
+            "SET status = EXCLUDED.status, error = NULL, claimed_at = now() "
+            "WHERE notifications.channel = 'email' AND (notifications.status = 'failed' OR "
+            "(notifications.status = 'pending' AND notifications.claimed_at < now() - interval '10 minutes')) "
+            "RETURNING id", key, channel, recipient, f["severity"], f["asset_id"], subject, status)
         return r["id"] if r else None
 
     def alert(self, findings: list[dict]) -> list[dict]:
@@ -75,11 +80,11 @@ class Notifier:
                 status, error = "disabled", None
                 if self.faults.smtp_unavailable:
                     status, error = "failed", "SMTP server unreachable (injected fault)"
-                elif self.send:
+                elif self.send is not None:
                     try:
                         self.send(r["email"], subject, body)
                         status = "sent"
-                    except (smtplib.SMTPException, OSError) as e:
+                    except Exception as e:   # any failure is recorded and retried; it must not stop other recipients
                         status, error = "failed", f"{type(e).__name__}: {e}"[:300]
                 self.db.exec("UPDATE notifications SET status = %s, error = %s WHERE id = %s", status, error, nid)
                 raised.append({"channel": "email", "to": r["email"], "status": status, "error": error})

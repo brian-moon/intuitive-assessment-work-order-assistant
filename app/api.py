@@ -66,6 +66,11 @@ def create_app(settings: Settings | None = None, llm: LLM | None = None, send=No
     app.state.settings, app.state.db, app.state.faults, app.state.pipeline = settings, db, faults, pipeline
     app.state.notifier = notifier
 
+    def close() -> None:   # release both connection pools (tests create many apps; a server process exits instead)
+        saver_pool.close()
+        db.close()
+    app.state.close = close
+
     # --- auth -----------------------------------------------------------------------------------------------------
     def user(authorization: str | None = Header(default=None)) -> dict:
         if not authorization or not authorization.startswith("Bearer "):
@@ -99,7 +104,7 @@ def create_app(settings: Settings | None = None, llm: LLM | None = None, send=No
 
     @app.get("/health")
     def health() -> dict:
-        return {"ok": True, "llm": llm.model, "email": "enabled" if notifier.send else "disabled"}
+        return {"ok": True, "llm": llm.model, "email": "enabled" if notifier.send is not None else "disabled"}
 
     # --- dashboard ------------------------------------------------------------------------------------------------
     @app.get("/api/dashboard")
@@ -124,7 +129,7 @@ def create_app(settings: Settings | None = None, llm: LLM | None = None, send=No
                          "ORDER BY created_at DESC LIMIT 10")
         return {"assets": assets, "alerts": alerts, "pending_approvals": pending, "work_orders": orders,
                 "rejected_rows": db.rows("SELECT source, asset_id, reason FROM data_rejections ORDER BY id"),
-                "email": "enabled" if notifier.send else "disabled"}
+                "email": "enabled" if notifier.send is not None else "disabled"}
 
     @app.get("/api/categories")
     def categories(_: dict = Depends(user)) -> list[dict]:

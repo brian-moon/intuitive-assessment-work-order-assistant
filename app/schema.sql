@@ -88,6 +88,7 @@ CREATE TABLE IF NOT EXISTS notifications (
     status     text NOT NULL,            -- sent | failed | disabled | shown
     error      text,
     created_at timestamptz NOT NULL DEFAULT now(),
+    claimed_at timestamptz NOT NULL DEFAULT now(),   -- lease for delivery; a stale or failed claim is retried
     acknowledged_at timestamptz,
     UNIQUE (dedupe_key, channel, recipient)
 );
