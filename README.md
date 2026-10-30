@@ -267,6 +267,9 @@ simulator and history, the model ladder (local model, then Claude, then a planne
 branding. They are there because they show how the same workflow behaves under live data and how its controls would
 be operated, not because the workflow needs them.
 
+Time: the core workflow, with its tests, evaluation and CI, took about 1.5 hours; the additions about 2.5 more. Both
+were built with an AI coding assistant (see AI usage).
+
 ## Design decisions
 
 - **One model call site.** Only `agent_draft` uses a model; thresholds, data quality, reconciliation, routing and

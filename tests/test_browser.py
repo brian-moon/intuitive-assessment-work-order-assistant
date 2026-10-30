@@ -150,7 +150,8 @@ def test_live_mode_history_and_scroll_position(server, page):
     assert page.evaluate("window.scrollY") == 0
     page.go_back()
     expect(page).to_have_url(f"{server}/dashboard")
-    page.wait_for_function(f"Math.abs(window.scrollY - {y0}) < 5", timeout=5000)
+    # the same place on the page; the browser's scroll anchoring may nudge it by a few pixels if content above settles
+    page.wait_for_function(f"Math.abs(window.scrollY - {y0}) <= 15", timeout=5000)
     page.go_forward()
     expect(page.get_by_test_id("ladder")).to_be_visible()
     page.go_back()
